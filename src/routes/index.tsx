@@ -1,35 +1,21 @@
 import { Badge } from "@cloudflare/kumo/components/badge"
 import { Button } from "@cloudflare/kumo/components/button"
-import {
-  ChartLegend,
-  ChartPalette,
-  TimeseriesChart,
-} from "@cloudflare/kumo/components/chart"
 import { Empty } from "@cloudflare/kumo/components/empty"
 import { DropdownMenu } from "@cloudflare/kumo/components/dropdown"
 import { LayerCard } from "@cloudflare/kumo/components/layer-card"
 import {
-  AndroidLogoIcon,
-  AppleLogoIcon,
-  BrowserIcon,
   CaretDownIcon,
   CodeIcon,
-  DesktopIcon,
-  DeviceMobileIcon,
-  DeviceTabletIcon,
   GlobeIcon,
-  LinuxLogoIcon,
   ShareNetworkIcon,
   TrashIcon,
   UserCircleIcon,
-  WindowsLogoIcon,
 } from "@phosphor-icons/react"
 import { ChartBarIcon } from "@phosphor-icons/react/dist/ssr"
 import { createFileRoute, useNavigate, useRouter } from "@tanstack/react-router"
 import { createServerFn } from "@tanstack/react-start"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { z } from "zod"
-import type { ReactNode } from "react"
 import type {
   DeviceDimension,
   LocationDimension,
@@ -43,27 +29,20 @@ import type {
 } from "@/lib/top-lists"
 import { AddSiteDialog } from "@/components/dashboard/add-site-dialog"
 import { DeleteSiteDialog } from "@/components/dashboard/delete-site-dialog"
-import {
-  ChromeLogo,
-  CountryFlag,
-  FirefoxLogo,
-  MicrosoftEdgeLogo,
-  SafariLogo,
-  SamsungBrowserLogo,
-  SourceIcon,
-} from "@/components/dashboard/icons"
+import { CountryFlag, SourceIcon } from "@/components/dashboard/icons"
 import { InstallScriptDialog } from "@/components/dashboard/install-script-dialog"
 import { PublicViewDialog } from "@/components/dashboard/public-view-dialog"
 import { authClient } from "@/lib/auth-client"
+import { CardHeader } from "@/components/dashboard/card-header"
+import {
+  BrowserMark,
+  DeviceMark,
+  OsMark,
+} from "@/components/dashboard/device-icons"
+import { OverviewCard } from "@/components/dashboard/overview-card"
 import { RankedList } from "@/components/dashboard/ranked-list"
 import { RealtimeGlobe } from "@/components/dashboard/realtime-globe"
 import { useLiveVisitors } from "@/hooks/use-live-visitors"
-import { echarts } from "@/lib/echarts"
-import {
-  formatCompactNumber,
-  formatDuration,
-  formatPercent,
-} from "@/lib/format"
 
 /** Server function — the dashboard's own UI reads its initial data this way. */
 const getDashboardData = createServerFn().handler(async () => {
@@ -110,64 +89,6 @@ interface TimeseriesPoint {
   timestamp: number
   pageviews: number
   visitors: number
-}
-
-function BrowserMark({ browser }: { browser: string }) {
-  let logo
-  switch (browser) {
-    case "Chrome":
-      logo = <ChromeLogo />
-      break
-    case "Safari":
-      logo = <SafariLogo />
-      break
-    case "Firefox":
-      logo = <FirefoxLogo />
-      break
-    case "Edge":
-    case "Microsoft Edge":
-      logo = <MicrosoftEdgeLogo />
-      break
-    case "Samsung Internet":
-    case "Samsung Browser":
-      logo = <SamsungBrowserLogo />
-      break
-    default:
-      logo = <BrowserIcon />
-  }
-
-  return (
-    <span
-      aria-hidden="true"
-      className="flex size-5 shrink-0 items-center justify-center [&>svg]:size-5"
-    >
-      {logo}
-    </span>
-  )
-}
-
-function OsMark({ os }: { os: string }) {
-  const className = "size-5 shrink-0 text-kumo-subtle"
-  switch (os) {
-    case "Windows":
-      return <WindowsLogoIcon className={className} weight="fill" />
-    case "macOS":
-    case "iOS":
-      return <AppleLogoIcon className={className} weight="fill" />
-    case "Android":
-      return <AndroidLogoIcon className={className} weight="fill" />
-    case "Linux":
-      return <LinuxLogoIcon className={className} weight="fill" />
-    default:
-      return <DesktopIcon className={className} />
-  }
-}
-
-function DeviceMark({ device }: { device: string }) {
-  const className = "size-5 shrink-0 text-kumo-subtle"
-  if (device === "mobile") return <DeviceMobileIcon className={className} />
-  if (device === "tablet") return <DeviceTabletIcon className={className} />
-  return <DesktopIcon className={className} />
 }
 
 async function fetchJson<T>(url: string, signal: AbortSignal): Promise<T> {
@@ -231,53 +152,6 @@ function useTopList<TRow>(
   }, [siteId, range, resource, view, animateViewChange])
 
   return result
-}
-
-function CardHeader({
-  title,
-  tabs,
-  value,
-  onValueChange,
-}: {
-  title: string
-  tabs: Array<{
-    value: string
-    label: ReactNode
-    ariaLabel?: string
-    title?: string
-  }>
-  value: string
-  onValueChange: (value: string, animate: boolean) => void
-}) {
-  return (
-    <div className="flex w-full min-w-0 items-center justify-between gap-2">
-      <span className="shrink-0">{title}</span>
-      <div className="ml-auto flex shrink-0 items-center gap-0.5">
-        {tabs.map((tab) => {
-          const selected = tab.value === value
-          return (
-            <Button
-              key={tab.value}
-              type="button"
-              variant="ghost"
-              size="xs"
-              aria-pressed={selected}
-              aria-label={tab.ariaLabel}
-              title={tab.title}
-              className={
-                selected
-                  ? "bg-kumo-fill text-kumo-default hover:bg-kumo-fill"
-                  : "text-kumo-subtle opacity-50 hover:opacity-100"
-              }
-              onClick={(event) => onValueChange(tab.value, event.detail !== 0)}
-            >
-              {tab.label}
-            </Button>
-          )
-        })}
-      </div>
-    </div>
-  )
 }
 
 const countryNames = new Intl.DisplayNames(["en"], { type: "region" })
@@ -446,22 +320,6 @@ function App() {
       replace: true,
     })
   }
-
-  const chartData = useMemo(
-    () => [
-      {
-        name: "Pageviews",
-        data: points.map((p) => [p.timestamp, p.pageviews] as [number, number]),
-        color: ChartPalette.categorical(0),
-      },
-      {
-        name: "Visitors",
-        data: points.map((p) => [p.timestamp, p.visitors] as [number, number]),
-        color: ChartPalette.categorical(1),
-      },
-    ],
-    [points]
-  )
 
   if (allSites.length === 0) {
     return (
@@ -633,49 +491,11 @@ function App() {
         </>
       )}
 
-      <LayerCard>
-        <LayerCard.Secondary>Overview</LayerCard.Secondary>
-        <LayerCard.Primary className="h-full p-2.5">
-          <div className="mb-3 flex flex-wrap divide-x divide-neutral-100 px-1">
-            <ChartLegend.LargeItem
-              name="Visitors"
-              color={ChartPalette.categorical(1)}
-              value={formatCompactNumber(summary?.visitors ?? 0)}
-              className="min-w-32 pr-4"
-            />
-            <ChartLegend.LargeItem
-              name="Visits"
-              color={ChartPalette.categorical(2)}
-              value={formatCompactNumber(summary?.visits ?? 0)}
-              className="min-w-32 px-4"
-            />
-            <ChartLegend.LargeItem
-              name="Pageviews"
-              color={ChartPalette.categorical(0)}
-              value={formatCompactNumber(summary?.pageviews ?? 0)}
-              className="min-w-32 px-4"
-            />
-            <ChartLegend.LargeItem
-              name="Bounce rate"
-              color={ChartPalette.semantic("Warning")}
-              value={formatPercent(summary?.bounceRate ?? 0)}
-              className="min-w-32 px-4"
-            />
-            <ChartLegend.LargeItem
-              name="Avg. duration"
-              color={ChartPalette.semantic("Neutral")}
-              value={formatDuration(summary?.avgDurationSeconds ?? 0)}
-              className="min-w-32 pl-4"
-            />
-          </div>
-          <TimeseriesChart
-            echarts={echarts}
-            data={chartData}
-            height={260}
-            loading={loading && points.length === 0}
-          />
-        </LayerCard.Primary>
-      </LayerCard>
+      <OverviewCard
+        summary={summary ?? {}}
+        points={points}
+        loading={loading && points.length === 0}
+      />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <LayerCard>

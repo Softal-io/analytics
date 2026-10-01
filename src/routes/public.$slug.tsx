@@ -1,31 +1,13 @@
 import { Badge } from "@cloudflare/kumo/components/badge"
 import { Button } from "@cloudflare/kumo/components/button"
-import {
-  ChartPalette,
-  TimeseriesChart,
-} from "@cloudflare/kumo/components/chart"
 import { DropdownMenu } from "@cloudflare/kumo/components/dropdown"
-import { LayerCard } from "@cloudflare/kumo/components/layer-card"
 import { CaretDownIcon } from "@phosphor-icons/react"
 import { createFileRoute, notFound, useNavigate } from "@tanstack/react-router"
 import { createServerFn } from "@tanstack/react-start"
 import { useEffect, useState } from "react"
 import { z } from "zod"
-import type { PublicMetric } from "@/lib/public-options"
-import { RankedList } from "@/components/dashboard/ranked-list"
+import { PublicDashboard } from "@/components/dashboard/public-dashboard"
 import { SourceIcon } from "@/components/dashboard/icons"
-import { echarts } from "@/lib/echarts"
-import {
-  formatCompactNumber,
-  formatDuration,
-  formatPercent,
-} from "@/lib/format"
-import {
-  metricLabels,
-  publicMetrics,
-  publicSections,
-  sectionLabels,
-} from "@/lib/public-options"
 
 const ranges = ["today", "7d", "30d", "6m", "1y"] as const
 const rangeLabels = [
@@ -70,14 +52,6 @@ export const Route = createFileRoute("/public/$slug")({
   ),
 })
 
-function metricValue(metric: PublicMetric, value: number) {
-  return metric === "bounceRate"
-    ? formatPercent(value)
-    : metric === "avgDurationSeconds"
-      ? formatDuration(value)
-      : formatCompactNumber(value)
-}
-
 function PublicView() {
   const snapshot = Route.useLoaderData()
   const { slug } = Route.useParams()
@@ -113,43 +87,22 @@ function PublicView() {
       window.clearInterval(interval)
     }
   }, [slug, snapshot.realtime])
-  const metrics = publicMetrics.filter(
-    (key) => snapshot.metrics[key] !== undefined
-  )
-  const chartData = snapshot.chart
-    ? [
-        {
-          name: "Pageviews",
-          color: ChartPalette.categorical(0),
-          data: snapshot.chart.map(
-            (point) => [point.timestamp, point.pageviews] as [number, number]
-          ),
-        },
-        {
-          name: "Visitors",
-          color: ChartPalette.categorical(1),
-          data: snapshot.chart.map(
-            (point) => [point.timestamp, point.visitors] as [number, number]
-          ),
-        },
-      ]
-    : null
   return (
-    <main className="mx-auto max-w-3xl space-y-4 p-4 sm:p-6">
+    <main className="mx-auto flex max-w-3xl flex-col gap-4 p-4 sm:p-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <SourceIcon domain={snapshot.site.domain} />
-            <h1 className="font-semibold">{snapshot.site.name}</h1>
-            {live !== undefined && (
-              <Badge appearance="dot" variant="success">
-                {live} online
-              </Badge>
-            )}
-          </div>
-          <p className="mt-1 text-xs text-kumo-subtle">
-            Public analytics · {snapshot.site.domain}
-          </p>
+        <div className="flex min-w-0 items-center gap-2">
+          <SourceIcon domain={snapshot.site.domain} />
+          <h1
+            className="max-w-52 shrink-0 font-semibold"
+            title={snapshot.site.domain}
+          >
+            {snapshot.site.name}
+          </h1>
+          {live !== undefined && live > 0 && (
+            <Badge appearance="dot" variant="success">
+              {live} online
+            </Badge>
+          )}
         </div>
         <DropdownMenu>
           <DropdownMenu.Trigger
@@ -163,11 +116,15 @@ function PublicView() {
               </Button>
             }
           />
-          <DropdownMenu.Content align="end" className="t-dropdown min-w-44">
+          <DropdownMenu.Content
+            align="end"
+            className="t-dropdown t-dropdown-origin-top-right min-w-44"
+          >
             {ranges.map((value, index) => (
               <DropdownMenu.Item
                 key={value}
                 selected={range === value}
+                className="[&>span:last-child]:ml-auto"
                 onClick={() =>
                   navigate({
                     to: "/public/$slug",
@@ -182,56 +139,7 @@ function PublicView() {
           </DropdownMenu.Content>
         </DropdownMenu>
       </header>
-      {(metrics.length > 0 || chartData) && (
-        <LayerCard>
-          <LayerCard.Secondary>Overview</LayerCard.Secondary>
-          <LayerCard.Primary className="p-3">
-            {metrics.length > 0 && (
-              <div className="flex flex-wrap gap-x-8 gap-y-4 px-1 py-2">
-                {metrics.map((metric) => (
-                  <div key={metric}>
-                    <p className="text-xs text-kumo-subtle">
-                      {metricLabels[metric]}
-                    </p>
-                    <p className="mt-1 text-2xl font-semibold">
-                      {metricValue(metric, snapshot.metrics[metric]!)}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
-            {chartData && (
-              <TimeseriesChart
-                echarts={echarts}
-                data={chartData}
-                height={260}
-              />
-            )}
-          </LayerCard.Primary>
-        </LayerCard>
-      )}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {publicSections.map((section) => {
-          const list = snapshot.sections[section]
-          return list ? (
-            <LayerCard key={section}>
-              <LayerCard.Secondary>
-                {sectionLabels[section]}
-              </LayerCard.Secondary>
-              <LayerCard.Primary className="p-2.5">
-                <RankedList
-                  items={list.rows.map((row, index) => ({
-                    key: `${index}:${row.label}`,
-                    label: row.label,
-                    value: row.count,
-                  }))}
-                  total={list.total}
-                />
-              </LayerCard.Primary>
-            </LayerCard>
-          ) : null
-        })}
-      </div>
+      <PublicDashboard snapshot={snapshot} />
       <p className="text-center text-xs text-kumo-subtle">
         {snapshot.range.fromDate} to {snapshot.range.toDate} · Shared by the
         website owner
