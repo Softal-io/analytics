@@ -7,8 +7,7 @@ import { insertSiteSchema, sites } from "@/db/schema"
  * `GET  /api/sites` — list all sites (dashboard site switcher).
  * `POST /api/sites` — create a new site.
  *
- * Single-owner tool (§10) — everything here sits behind Cloudflare Access
- * once configured at the zone level. No app-level auth.
+ * The Worker checks viewer access for reads and admin access for writes.
  */
 export const Route = createFileRoute("/api/sites")({
   server: {

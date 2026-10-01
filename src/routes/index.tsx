@@ -19,7 +19,9 @@ import {
   DeviceTabletIcon,
   GlobeIcon,
   LinuxLogoIcon,
+  ShareNetworkIcon,
   TrashIcon,
+  UserCircleIcon,
   WindowsLogoIcon,
 } from "@phosphor-icons/react"
 import { ChartBarIcon } from "@phosphor-icons/react/dist/ssr"
@@ -51,6 +53,8 @@ import {
   SourceIcon,
 } from "@/components/dashboard/icons"
 import { InstallScriptDialog } from "@/components/dashboard/install-script-dialog"
+import { PublicViewDialog } from "@/components/dashboard/public-view-dialog"
+import { authClient } from "@/lib/auth-client"
 import { RankedList } from "@/components/dashboard/ranked-list"
 import { RealtimeGlobe } from "@/components/dashboard/realtime-globe"
 import { useLiveVisitors } from "@/hooks/use-live-visitors"
@@ -285,8 +289,46 @@ function locationLabel(row: TopLocationRow, dimension: LocationDimension) {
   return country
 }
 
+function AccountMenu({ email, isAdmin }: { email: string; isAdmin: boolean }) {
+  const navigate = useNavigate()
+  return (
+    <DropdownMenu>
+      <DropdownMenu.Trigger
+        render={
+          <Button
+            variant="ghost"
+            icon={<UserCircleIcon size={20} />}
+            aria-label="Account menu"
+          />
+        }
+      />
+      <DropdownMenu.Content align="end" className="t-dropdown min-w-56">
+        <div className="px-3 py-2 text-xs text-kumo-subtle">
+          {email}
+          <br />
+          {isAdmin ? "Admin" : "Viewer"}
+        </div>
+        {isAdmin && (
+          <DropdownMenu.Item onClick={() => navigate({ to: "/admin/users" })}>
+            Manage user access
+          </DropdownMenu.Item>
+        )}
+        <DropdownMenu.Item
+          onClick={async () => {
+            await authClient.signOut()
+            window.location.assign("/login")
+          }}
+        >
+          Sign out
+        </DropdownMenu.Item>
+      </DropdownMenu.Content>
+    </DropdownMenu>
+  )
+}
+
 function App() {
-  const { sites: allSites, trackerOrigin } = Route.useLoaderData()
+  const { sites: allSites, trackerOrigin, user } = Route.useLoaderData()
+  const isAdmin = user.role === "admin"
   const search = Route.useSearch()
   const navigate = useNavigate()
   const router = useRouter()
@@ -312,6 +354,7 @@ function App() {
   const [addSiteOpen, setAddSiteOpen] = useState(false)
   const [deleteSiteId, setDeleteSiteId] = useState<string | null>(null)
   const [installSiteId, setInstallSiteId] = useState<string | null>(null)
+  const [publicViewOpen, setPublicViewOpen] = useState(false)
   const animatePageFilterRef = useRef(false)
   const animateSourceFilterRef = useRef(false)
   const animateDeviceFilterRef = useRef(false)
@@ -422,11 +465,18 @@ function App() {
 
   if (allSites.length === 0) {
     return (
-      <div className="flex min-h-svh items-center justify-center p-6">
+      <div className="flex min-h-svh flex-col items-center justify-center gap-4 p-6">
+        <AccountMenu email={user.email} isAdmin={isAdmin} />
         <Empty
           icon={<ChartBarIcon weight="duotone" size={32} />}
-          title="Add a site to start tracking"
-          contents={<AddSiteDialog onCreated={handleSiteCreated} />}
+          title={isAdmin ? "Add a site to start tracking" : "No websites yet"}
+          contents={
+            isAdmin ? (
+              <AddSiteDialog onCreated={handleSiteCreated} />
+            ) : (
+              <p>An admin can add a website.</p>
+            )
+          }
           className="max-w-sm [h2]:text-sm"
         />
       </div>
@@ -451,7 +501,7 @@ function App() {
               render={
                 <Button
                   variant="ghost"
-                  className="-ml-2 max-w-full min-w-0 justify-start px-2"
+                  className="-ml-2 max-w-full min-w-0 justify-start pr-4 pl-2"
                   aria-label={`Switch site. Current site: ${selectedSite.name}`}
                 >
                   <SourceIcon domain={selectedSite.domain} />
@@ -477,18 +527,22 @@ function App() {
                   {site.name}
                 </DropdownMenu.Item>
               ))}
-              <DropdownMenu.Separator />
-              <DropdownMenu.Item onClick={() => setAddSiteOpen(true)}>
-                Add site
-              </DropdownMenu.Item>
-              <DropdownMenu.Separator />
-              <DropdownMenu.Item
-                variant="danger"
-                icon={<TrashIcon />}
-                onClick={() => setDeleteSiteId(selectedSite.id)}
-              >
-                Delete site
-              </DropdownMenu.Item>
+              {isAdmin && (
+                <>
+                  <DropdownMenu.Separator />
+                  <DropdownMenu.Item onClick={() => setAddSiteOpen(true)}>
+                    Add site
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Separator />
+                  <DropdownMenu.Item
+                    variant="danger"
+                    icon={<TrashIcon />}
+                    onClick={() => setDeleteSiteId(selectedSite.id)}
+                  >
+                    Delete site
+                  </DropdownMenu.Item>
+                </>
+              )}
             </DropdownMenu.Content>
           </DropdownMenu>
           {liveVisitors.count !== null && liveVisitors.count > 0 ? (
@@ -499,12 +553,22 @@ function App() {
         </div>
 
         <div className="flex flex-wrap items-center gap-1">
-          <Button
-            variant="ghost"
-            icon={<CodeIcon weight="bold" className="text-neutral-800" />}
-            onClick={() => setInstallSiteId(selectedSite.id)}
-            aria-label="Install script"
-          />
+          {isAdmin && (
+            <>
+              <Button
+                variant="ghost"
+                icon={<CodeIcon weight="bold" className="text-neutral-800" />}
+                onClick={() => setInstallSiteId(selectedSite.id)}
+                aria-label="Install script"
+              />
+              <Button
+                variant="ghost"
+                icon={<ShareNetworkIcon weight="bold" />}
+                aria-label="Public sharing"
+                onClick={() => setPublicViewOpen(true)}
+              />
+            </>
+          )}
           <DropdownMenu>
             <DropdownMenu.Trigger
               render={
@@ -533,29 +597,41 @@ function App() {
               ))}
             </DropdownMenu.Content>
           </DropdownMenu>
+          <AccountMenu email={user.email} isAdmin={isAdmin} />
         </div>
       </header>
 
-      <AddSiteDialog
-        open={addSiteOpen}
-        onOpenChange={setAddSiteOpen}
-        showTrigger={false}
-        onCreated={handleSiteCreated}
-      />
-      <InstallScriptDialog
-        open={installSiteId !== null}
-        onOpenChange={(open) => !open && setInstallSiteId(null)}
-        siteId={installSite.id}
-        siteName={installSite.name}
-        trackerOrigin={trackerOrigin}
-      />
-      <DeleteSiteDialog
-        open={deleteSiteId !== null}
-        onOpenChange={(open) => !open && setDeleteSiteId(null)}
-        siteId={deleteSite.id}
-        siteName={deleteSite.name}
-        onDeleted={handleSiteDeleted}
-      />
+      {isAdmin && (
+        <>
+          <PublicViewDialog
+            open={publicViewOpen}
+            onOpenChange={setPublicViewOpen}
+            siteId={selectedSite.id}
+            siteName={selectedSite.name}
+            trackerOrigin={trackerOrigin}
+          />
+          <AddSiteDialog
+            open={addSiteOpen}
+            onOpenChange={setAddSiteOpen}
+            showTrigger={false}
+            onCreated={handleSiteCreated}
+          />
+          <InstallScriptDialog
+            open={installSiteId !== null}
+            onOpenChange={(open) => !open && setInstallSiteId(null)}
+            siteId={installSite.id}
+            siteName={installSite.name}
+            trackerOrigin={trackerOrigin}
+          />
+          <DeleteSiteDialog
+            open={deleteSiteId !== null}
+            onOpenChange={(open) => !open && setDeleteSiteId(null)}
+            siteId={deleteSite.id}
+            siteName={deleteSite.name}
+            onDeleted={handleSiteDeleted}
+          />
+        </>
+      )}
 
       <LayerCard>
         <LayerCard.Secondary>Overview</LayerCard.Secondary>

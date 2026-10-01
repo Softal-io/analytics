@@ -8,9 +8,12 @@
  */
 
 interface __AnalyticsSecrets {
+  BETTER_AUTH_SECRET?: string
+  GOOGLE_CLIENT_ID?: string
+  GOOGLE_CLIENT_SECRET?: string
   /**
    * Bearer token for the read-only `/ext/v1/*` API consumed by external
-   * clients (the TAP miniapp dashboard).
+   * clients.
    *
    * When unset, `/ext/v1/*` returns 503 and stays completely closed —
    * absence of a token is never treated as "no auth required".

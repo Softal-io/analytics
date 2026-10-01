@@ -1,6 +1,7 @@
 import handler from "@tanstack/react-start/server-entry"
 import { runDailyAggregation } from "@/lib/aggregate"
 import { handleExternalApi } from "@/lib/external-api"
+import { authorizeDashboard } from "@/lib/dashboard-auth"
 
 export { LiveVisitors } from "@/durable-objects/live-visitors"
 
@@ -13,13 +14,23 @@ export default {
     const external = await handleExternalApi(request)
     if (external) return external
 
+    const unauthorized = await authorizeDashboard(request)
+    if (unauthorized) return unauthorized
+
     // TanStack Start reads bindings from `cloudflare:workers`, so the
     // handler takes the request alone — env/ctx aren't forwarded.
-    return handler.fetch(request)
+    const response = await handler.fetch(request)
+    if (response.status !== 101)
+      response.headers.set("Cache-Control", "no-store")
+    return response
   },
 
   // Daily rollup cron (§7) — see wrangler.jsonc `triggers.crons`.
-  async scheduled(_event: ScheduledController, _env: Env, ctx: ExecutionContext) {
+  async scheduled(
+    _event: ScheduledController,
+    _env: Env,
+    ctx: ExecutionContext
+  ) {
     ctx.waitUntil(runDailyAggregation())
   },
 }

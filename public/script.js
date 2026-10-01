@@ -2,7 +2,7 @@
  * Personal Web Analytics — tracking snippet.
  *
  * Usage:
- *   <script defer src="https://analytics.fayazahmed.com/script.js" data-site="SITE_ID"></script>
+ *   <script defer src="https://analytics.example.com/script.js" data-site="SITE_ID"></script>
  *
  * Custom events:
  *   window.wa.track("signup", { plan: "pro" })

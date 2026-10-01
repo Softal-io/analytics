@@ -11,12 +11,20 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as CollectRouteImport } from './routes/collect'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as AdminUsersRouteImport } from './routes/admin.users'
 import { Route as ApiSitesRouteImport } from './routes/api/sites'
+import { Route as PublicSlugRouteImport } from './routes/public.$slug'
+import { Route as ApiAdminAccessRouteImport } from './routes/api/admin.access'
+import { Route as ApiAuthSplatRouteImport } from './routes/api/auth.$'
+import { Route as ApiPublicSlugRouteImport } from './routes/api/public.$slug'
 import { Route as ApiSitesSiteIdRouteImport } from './routes/api/sites.$siteId'
+import { Route as ApiPublicSlugRealtimeRouteImport } from './routes/api/public.$slug.realtime'
 import { Route as ApiSitesSiteIdActivityRouteImport } from './routes/api/sites.$siteId.activity'
 import { Route as ApiSitesSiteIdDevicesRouteImport } from './routes/api/sites.$siteId.devices'
 import { Route as ApiSitesSiteIdLocationsRouteImport } from './routes/api/sites.$siteId.locations'
 import { Route as ApiSitesSiteIdPagesRouteImport } from './routes/api/sites.$siteId.pages'
+import { Route as ApiSitesSiteIdPublicViewRouteImport } from './routes/api/sites.$siteId.public-view'
 import { Route as ApiSitesSiteIdSourcesRouteImport } from './routes/api/sites.$siteId.sources'
 import { Route as ApiSitesSiteIdSummaryRouteImport } from './routes/api/sites.$siteId.summary'
 import { Route as ApiSitesSiteIdTimeseriesRouteImport } from './routes/api/sites.$siteId.timeseries'
@@ -32,15 +40,50 @@ const CollectRoute = CollectRouteImport.update({
   path: '/collect',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminUsersRoute = AdminUsersRouteImport.update({
+  id: '/admin/users',
+  path: '/admin/users',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiSitesRoute = ApiSitesRouteImport.update({
   id: '/api/sites',
   path: '/api/sites',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PublicSlugRoute = PublicSlugRouteImport.update({
+  id: '/public/$slug',
+  path: '/public/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAdminAccessRoute = ApiAdminAccessRouteImport.update({
+  id: '/api/admin/access',
+  path: '/api/admin/access',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
+  id: '/api/auth/$',
+  path: '/api/auth/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPublicSlugRoute = ApiPublicSlugRouteImport.update({
+  id: '/api/public/$slug',
+  path: '/api/public/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiSitesSiteIdRoute = ApiSitesSiteIdRouteImport.update({
   id: '/$siteId',
   path: '/$siteId',
   getParentRoute: () => ApiSitesRoute,
+} as any)
+const ApiPublicSlugRealtimeRoute = ApiPublicSlugRealtimeRouteImport.update({
+  id: '/realtime',
+  path: '/realtime',
+  getParentRoute: () => ApiPublicSlugRoute,
 } as any)
 const ApiSitesSiteIdActivityRoute = ApiSitesSiteIdActivityRouteImport.update({
   id: '/activity',
@@ -62,6 +105,12 @@ const ApiSitesSiteIdPagesRoute = ApiSitesSiteIdPagesRouteImport.update({
   path: '/pages',
   getParentRoute: () => ApiSitesSiteIdRoute,
 } as any)
+const ApiSitesSiteIdPublicViewRoute =
+  ApiSitesSiteIdPublicViewRouteImport.update({
+    id: '/public-view',
+    path: '/public-view',
+    getParentRoute: () => ApiSitesSiteIdRoute,
+  } as any)
 const ApiSitesSiteIdSourcesRoute = ApiSitesSiteIdSourcesRouteImport.update({
   id: '/sources',
   path: '/sources',
@@ -88,12 +137,20 @@ const ApiSitesSiteIdRealtimeWsRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/collect': typeof CollectRoute
+  '/login': typeof LoginRoute
+  '/admin/users': typeof AdminUsersRoute
   '/api/sites': typeof ApiSitesRouteWithChildren
+  '/public/$slug': typeof PublicSlugRoute
+  '/api/admin/access': typeof ApiAdminAccessRoute
+  '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/public/$slug': typeof ApiPublicSlugRouteWithChildren
   '/api/sites/$siteId': typeof ApiSitesSiteIdRouteWithChildren
+  '/api/public/$slug/realtime': typeof ApiPublicSlugRealtimeRoute
   '/api/sites/$siteId/activity': typeof ApiSitesSiteIdActivityRoute
   '/api/sites/$siteId/devices': typeof ApiSitesSiteIdDevicesRoute
   '/api/sites/$siteId/locations': typeof ApiSitesSiteIdLocationsRoute
   '/api/sites/$siteId/pages': typeof ApiSitesSiteIdPagesRoute
+  '/api/sites/$siteId/public-view': typeof ApiSitesSiteIdPublicViewRoute
   '/api/sites/$siteId/sources': typeof ApiSitesSiteIdSourcesRoute
   '/api/sites/$siteId/summary': typeof ApiSitesSiteIdSummaryRoute
   '/api/sites/$siteId/timeseries': typeof ApiSitesSiteIdTimeseriesRoute
@@ -102,12 +159,20 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/collect': typeof CollectRoute
+  '/login': typeof LoginRoute
+  '/admin/users': typeof AdminUsersRoute
   '/api/sites': typeof ApiSitesRouteWithChildren
+  '/public/$slug': typeof PublicSlugRoute
+  '/api/admin/access': typeof ApiAdminAccessRoute
+  '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/public/$slug': typeof ApiPublicSlugRouteWithChildren
   '/api/sites/$siteId': typeof ApiSitesSiteIdRouteWithChildren
+  '/api/public/$slug/realtime': typeof ApiPublicSlugRealtimeRoute
   '/api/sites/$siteId/activity': typeof ApiSitesSiteIdActivityRoute
   '/api/sites/$siteId/devices': typeof ApiSitesSiteIdDevicesRoute
   '/api/sites/$siteId/locations': typeof ApiSitesSiteIdLocationsRoute
   '/api/sites/$siteId/pages': typeof ApiSitesSiteIdPagesRoute
+  '/api/sites/$siteId/public-view': typeof ApiSitesSiteIdPublicViewRoute
   '/api/sites/$siteId/sources': typeof ApiSitesSiteIdSourcesRoute
   '/api/sites/$siteId/summary': typeof ApiSitesSiteIdSummaryRoute
   '/api/sites/$siteId/timeseries': typeof ApiSitesSiteIdTimeseriesRoute
@@ -117,12 +182,20 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/collect': typeof CollectRoute
+  '/login': typeof LoginRoute
+  '/admin/users': typeof AdminUsersRoute
   '/api/sites': typeof ApiSitesRouteWithChildren
+  '/public/$slug': typeof PublicSlugRoute
+  '/api/admin/access': typeof ApiAdminAccessRoute
+  '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/public/$slug': typeof ApiPublicSlugRouteWithChildren
   '/api/sites/$siteId': typeof ApiSitesSiteIdRouteWithChildren
+  '/api/public/$slug/realtime': typeof ApiPublicSlugRealtimeRoute
   '/api/sites/$siteId/activity': typeof ApiSitesSiteIdActivityRoute
   '/api/sites/$siteId/devices': typeof ApiSitesSiteIdDevicesRoute
   '/api/sites/$siteId/locations': typeof ApiSitesSiteIdLocationsRoute
   '/api/sites/$siteId/pages': typeof ApiSitesSiteIdPagesRoute
+  '/api/sites/$siteId/public-view': typeof ApiSitesSiteIdPublicViewRoute
   '/api/sites/$siteId/sources': typeof ApiSitesSiteIdSourcesRoute
   '/api/sites/$siteId/summary': typeof ApiSitesSiteIdSummaryRoute
   '/api/sites/$siteId/timeseries': typeof ApiSitesSiteIdTimeseriesRoute
@@ -133,12 +206,20 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/collect'
+    | '/login'
+    | '/admin/users'
     | '/api/sites'
+    | '/public/$slug'
+    | '/api/admin/access'
+    | '/api/auth/$'
+    | '/api/public/$slug'
     | '/api/sites/$siteId'
+    | '/api/public/$slug/realtime'
     | '/api/sites/$siteId/activity'
     | '/api/sites/$siteId/devices'
     | '/api/sites/$siteId/locations'
     | '/api/sites/$siteId/pages'
+    | '/api/sites/$siteId/public-view'
     | '/api/sites/$siteId/sources'
     | '/api/sites/$siteId/summary'
     | '/api/sites/$siteId/timeseries'
@@ -147,12 +228,20 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/collect'
+    | '/login'
+    | '/admin/users'
     | '/api/sites'
+    | '/public/$slug'
+    | '/api/admin/access'
+    | '/api/auth/$'
+    | '/api/public/$slug'
     | '/api/sites/$siteId'
+    | '/api/public/$slug/realtime'
     | '/api/sites/$siteId/activity'
     | '/api/sites/$siteId/devices'
     | '/api/sites/$siteId/locations'
     | '/api/sites/$siteId/pages'
+    | '/api/sites/$siteId/public-view'
     | '/api/sites/$siteId/sources'
     | '/api/sites/$siteId/summary'
     | '/api/sites/$siteId/timeseries'
@@ -161,12 +250,20 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/collect'
+    | '/login'
+    | '/admin/users'
     | '/api/sites'
+    | '/public/$slug'
+    | '/api/admin/access'
+    | '/api/auth/$'
+    | '/api/public/$slug'
     | '/api/sites/$siteId'
+    | '/api/public/$slug/realtime'
     | '/api/sites/$siteId/activity'
     | '/api/sites/$siteId/devices'
     | '/api/sites/$siteId/locations'
     | '/api/sites/$siteId/pages'
+    | '/api/sites/$siteId/public-view'
     | '/api/sites/$siteId/sources'
     | '/api/sites/$siteId/summary'
     | '/api/sites/$siteId/timeseries'
@@ -176,7 +273,13 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   CollectRoute: typeof CollectRoute
+  LoginRoute: typeof LoginRoute
+  AdminUsersRoute: typeof AdminUsersRoute
   ApiSitesRoute: typeof ApiSitesRouteWithChildren
+  PublicSlugRoute: typeof PublicSlugRoute
+  ApiAdminAccessRoute: typeof ApiAdminAccessRoute
+  ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiPublicSlugRoute: typeof ApiPublicSlugRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
@@ -195,11 +298,53 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CollectRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/users': {
+      id: '/admin/users'
+      path: '/admin/users'
+      fullPath: '/admin/users'
+      preLoaderRoute: typeof AdminUsersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/sites': {
       id: '/api/sites'
       path: '/api/sites'
       fullPath: '/api/sites'
       preLoaderRoute: typeof ApiSitesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/public/$slug': {
+      id: '/public/$slug'
+      path: '/public/$slug'
+      fullPath: '/public/$slug'
+      preLoaderRoute: typeof PublicSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/admin/access': {
+      id: '/api/admin/access'
+      path: '/api/admin/access'
+      fullPath: '/api/admin/access'
+      preLoaderRoute: typeof ApiAdminAccessRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/$': {
+      id: '/api/auth/$'
+      path: '/api/auth/$'
+      fullPath: '/api/auth/$'
+      preLoaderRoute: typeof ApiAuthSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/$slug': {
+      id: '/api/public/$slug'
+      path: '/api/public/$slug'
+      fullPath: '/api/public/$slug'
+      preLoaderRoute: typeof ApiPublicSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/sites/$siteId': {
@@ -208,6 +353,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/api/sites/$siteId'
       preLoaderRoute: typeof ApiSitesSiteIdRouteImport
       parentRoute: typeof ApiSitesRoute
+    }
+    '/api/public/$slug/realtime': {
+      id: '/api/public/$slug/realtime'
+      path: '/realtime'
+      fullPath: '/api/public/$slug/realtime'
+      preLoaderRoute: typeof ApiPublicSlugRealtimeRouteImport
+      parentRoute: typeof ApiPublicSlugRoute
     }
     '/api/sites/$siteId/activity': {
       id: '/api/sites/$siteId/activity'
@@ -235,6 +387,13 @@ declare module '@tanstack/react-router' {
       path: '/pages'
       fullPath: '/api/sites/$siteId/pages'
       preLoaderRoute: typeof ApiSitesSiteIdPagesRouteImport
+      parentRoute: typeof ApiSitesSiteIdRoute
+    }
+    '/api/sites/$siteId/public-view': {
+      id: '/api/sites/$siteId/public-view'
+      path: '/public-view'
+      fullPath: '/api/sites/$siteId/public-view'
+      preLoaderRoute: typeof ApiSitesSiteIdPublicViewRouteImport
       parentRoute: typeof ApiSitesSiteIdRoute
     }
     '/api/sites/$siteId/sources': {
@@ -273,6 +432,7 @@ interface ApiSitesSiteIdRouteChildren {
   ApiSitesSiteIdDevicesRoute: typeof ApiSitesSiteIdDevicesRoute
   ApiSitesSiteIdLocationsRoute: typeof ApiSitesSiteIdLocationsRoute
   ApiSitesSiteIdPagesRoute: typeof ApiSitesSiteIdPagesRoute
+  ApiSitesSiteIdPublicViewRoute: typeof ApiSitesSiteIdPublicViewRoute
   ApiSitesSiteIdSourcesRoute: typeof ApiSitesSiteIdSourcesRoute
   ApiSitesSiteIdSummaryRoute: typeof ApiSitesSiteIdSummaryRoute
   ApiSitesSiteIdTimeseriesRoute: typeof ApiSitesSiteIdTimeseriesRoute
@@ -284,6 +444,7 @@ const ApiSitesSiteIdRouteChildren: ApiSitesSiteIdRouteChildren = {
   ApiSitesSiteIdDevicesRoute: ApiSitesSiteIdDevicesRoute,
   ApiSitesSiteIdLocationsRoute: ApiSitesSiteIdLocationsRoute,
   ApiSitesSiteIdPagesRoute: ApiSitesSiteIdPagesRoute,
+  ApiSitesSiteIdPublicViewRoute: ApiSitesSiteIdPublicViewRoute,
   ApiSitesSiteIdSourcesRoute: ApiSitesSiteIdSourcesRoute,
   ApiSitesSiteIdSummaryRoute: ApiSitesSiteIdSummaryRoute,
   ApiSitesSiteIdTimeseriesRoute: ApiSitesSiteIdTimeseriesRoute,
@@ -306,10 +467,28 @@ const ApiSitesRouteWithChildren = ApiSitesRoute._addFileChildren(
   ApiSitesRouteChildren,
 )
 
+interface ApiPublicSlugRouteChildren {
+  ApiPublicSlugRealtimeRoute: typeof ApiPublicSlugRealtimeRoute
+}
+
+const ApiPublicSlugRouteChildren: ApiPublicSlugRouteChildren = {
+  ApiPublicSlugRealtimeRoute: ApiPublicSlugRealtimeRoute,
+}
+
+const ApiPublicSlugRouteWithChildren = ApiPublicSlugRoute._addFileChildren(
+  ApiPublicSlugRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   CollectRoute: CollectRoute,
+  LoginRoute: LoginRoute,
+  AdminUsersRoute: AdminUsersRoute,
   ApiSitesRoute: ApiSitesRouteWithChildren,
+  PublicSlugRoute: PublicSlugRoute,
+  ApiAdminAccessRoute: ApiAdminAccessRoute,
+  ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiPublicSlugRoute: ApiPublicSlugRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

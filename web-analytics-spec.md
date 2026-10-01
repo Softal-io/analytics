@@ -1,7 +1,7 @@
 # Personal Web Analytics — Technical Spec
 
 **Status:** Draft
-**Owner:** Fayaz
+**Owner:** Deployment administrator
 **Stack:** Cloudflare Workers + D1 + Cron Triggers + Durable Objects, single-user, no auth complexity beyond one owner
 
 ---

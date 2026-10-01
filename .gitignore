@@ -17,3 +17,7 @@ todos.json
 !.dev.vars.example
 !.env.example
 seed-output.sql
+.deployment-credentials.json
+
+# Deployment-specific domains, account IDs, and database IDs.
+wrangler.local.jsonc

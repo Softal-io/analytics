@@ -523,11 +523,11 @@ export interface TopEventRow {
   count: number
 }
 
-export async function computeTopEvents(
+export async function computeEventList(
   site: Site,
   resolved: ResolvedRange,
   limit = 10
-): Promise<Array<TopEventRow>> {
+): Promise<TopListResult<TopEventRow>> {
   const { rollupBounds, includesToday } = splitRangeForQuery(resolved)
   const merged = new Map<string, number>()
   const { startSec, endSec } = todayBounds(site, resolved)
@@ -569,8 +569,18 @@ export async function computeTopEvents(
     merged.set(row.name, (merged.get(row.name) ?? 0) + Number(row.count))
   }
 
-  return Array.from(merged.entries())
-    .map(([name, count]) => ({ name, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, limit)
+  return rankRows(
+    Array.from(merged, ([name, count]) => ({ name, count })),
+    (row) => row.count,
+    limit
+  )
+}
+
+/** Preserve the row-only API used by existing integrations. */
+export async function computeTopEvents(
+  site: Site,
+  resolved: ResolvedRange,
+  limit = 10
+): Promise<Array<TopEventRow>> {
+  return (await computeEventList(site, resolved, limit)).rows
 }

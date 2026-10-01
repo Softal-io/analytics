@@ -22,14 +22,13 @@ import {
  *
  * Why this exists separately from `/api/*`:
  *
- * `/api/*` is meant to sit behind Cloudflare Access (README §10), which
- * authenticates a *browser* via cookie. An external client like the TAP
- * miniapp can't complete an interactive Access login, so it needs a path
- * that Access bypasses and that carries its own credential instead.
+ * `/api/*` belongs to the session-authenticated browser dashboard. External
+ * clients use a separate read-only credential instead of a browser
+ * session.
  *
  * So the split is deliberate:
  *
- *   /api/*     Access-protected, read+write, first-party dashboard.
+ *   /api/*     session-authenticated, read+write, first-party dashboard.
  *   /ext/v1/*  bearer-token, READ-ONLY, external clients.
  *
  * Read-only is the useful security property here: leaking the token
@@ -37,7 +36,6 @@ import {
  *
  * Deploy notes:
  *   wrangler secret put ANALYTICS_API_TOKEN
- *   ...then add a Cloudflare Access bypass policy for /ext/v1/*
  */
 
 const PREFIX = "/ext/v1"

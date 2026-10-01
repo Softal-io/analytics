@@ -1,9 +1,15 @@
 # Copy to .dev.vars and fill in. Loaded by wrangler in local dev only.
-# For production, set with: wrangler secret put MY_SECRET
-# Bindings (D1, KV, R2, etc.) go in wrangler.jsonc, NOT here.
+# For production, set with: npm run cf -- secret put MY_SECRET
+# Bindings (D1, KV, R2, etc.) go in your Wrangler config, NOT here.
 
-# Bearer token for the read-only /ext/v1/* API (consumed by the TAP
-# miniapp dashboard). Leave unset to keep /ext/v1/* switched off — it
+# Better Auth uses Google sign-in. Keep all credentials server-side.
+BETTER_AUTH_URL="http://localhost:3000"
+BETTER_AUTH_SECRET="generate-a-random-secret-of-at-least-32-characters"
+GOOGLE_CLIENT_ID="your-client-id.apps.googleusercontent.com"
+GOOGLE_CLIENT_SECRET="your-client-secret"
+
+# Bearer token for the read-only /ext/v1/* API used by external clients.
+# Leave unset to keep /ext/v1/* switched off; it
 # fails closed with 503 rather than serving unauthenticated requests.
 # Generate one with: openssl rand -hex 32
 # ANALYTICS_API_TOKEN="..."

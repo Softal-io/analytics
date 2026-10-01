@@ -15,6 +15,13 @@
       "when": 1784789615858,
       "tag": "0001_amused_hannibal_king",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1790882528375,
+      "tag": "0002_redundant_hulk",
+      "breakpoints": true
     }
   ]
 }

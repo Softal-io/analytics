@@ -12,7 +12,7 @@
   "preview_urls": false,
   "routes": [
     {
-      "pattern": "analytics.fayazahmed.com",
+      "pattern": "analytics.example.com",
       "custom_domain": true
     }
   ],
@@ -21,15 +21,15 @@
   },
   "upload_source_maps": true,
   "vars": {
-    "TRACKER_ORIGIN": "https://analytics.fayazahmed.com"
+    "BETTER_AUTH_URL": "https://analytics.example.com",
+    "TRACKER_ORIGIN": "https://analytics.example.com"
   },
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "web-analytics-db",
-      "database_id": "22cbc435-c93f-4f2d-b3da-2dec61736110",
-      // Preserve the original local D1 identity that contains demo data.
-      "preview_database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
+      // Replace with the ID returned by `npm run cf -- d1 create web-analytics-db`.
+      "database_id": "00000000-0000-0000-0000-000000000000",
       "migrations_dir": "drizzle"
     }
   ],

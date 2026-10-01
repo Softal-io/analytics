@@ -8,7 +8,8 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core"
 import { createInsertSchema, createSelectSchema } from "drizzle-zod"
-import type { z } from "zod"
+import { z } from "zod"
+import { publicMetrics, publicSections } from "@/lib/public-options"
 
 /**
  * Personal Web Analytics — data model.
@@ -34,6 +35,140 @@ export const sites = sqliteTable("sites", {
   timezone: text("timezone").notNull().default("UTC"),
   createdAt: int("created_at").notNull(),
 })
+
+// Authentication shares the analytics D1 database. Better Auth owns these rows.
+export const authUser = sqliteTable("auth_user", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  email: text("email").notNull().unique(),
+  emailVerified: int("email_verified", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  image: text("image"),
+  createdAt: int("created_at", { mode: "timestamp_ms" }).notNull(),
+  updatedAt: int("updated_at", { mode: "timestamp_ms" }).notNull(),
+})
+
+export const authSession = sqliteTable(
+  "auth_session",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => authUser.id, { onDelete: "cascade" }),
+    token: text("token").notNull().unique(),
+    expiresAt: int("expires_at", { mode: "timestamp_ms" }).notNull(),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    createdAt: int("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: int("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("idx_auth_session_user").on(table.userId)]
+)
+
+export const authAccount = sqliteTable(
+  "auth_account",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => authUser.id, { onDelete: "cascade" }),
+    accountId: text("account_id").notNull(),
+    providerId: text("provider_id").notNull(),
+    accessToken: text("access_token"),
+    refreshToken: text("refresh_token"),
+    idToken: text("id_token"),
+    accessTokenExpiresAt: int("access_token_expires_at", {
+      mode: "timestamp_ms",
+    }),
+    refreshTokenExpiresAt: int("refresh_token_expires_at", {
+      mode: "timestamp_ms",
+    }),
+    scope: text("scope"),
+    password: text("password"),
+    createdAt: int("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: int("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("idx_auth_account_user").on(table.userId),
+    uniqueIndex("idx_auth_account_provider").on(
+      table.providerId,
+      table.accountId
+    ),
+  ]
+)
+
+export const authVerification = sqliteTable(
+  "auth_verification",
+  {
+    id: text("id").primaryKey(),
+    identifier: text("identifier").notNull(),
+    value: text("value").notNull(),
+    expiresAt: int("expires_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: int("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: int("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("idx_auth_verification_identifier").on(table.identifier)]
+)
+
+export const accessGrants = sqliteTable("access_grants", {
+  email: text("email").primaryKey(),
+  role: text("role", { enum: ["admin", "viewer"] }).notNull(),
+  updatedAt: int("updated_at").notNull(),
+})
+
+export const sitePublicViews = sqliteTable("site_public_views", {
+  siteId: text("site_id")
+    .primaryKey()
+    .references(() => sites.id, { onDelete: "cascade" }),
+  slug: text("slug").notNull().unique(),
+  enabled: int("enabled", { mode: "boolean" }).notNull().default(false),
+  metrics: text("metrics", { mode: "json" })
+    .$type<Array<(typeof publicMetrics)[number]>>()
+    .notNull(),
+  sections: text("sections", { mode: "json" })
+    .$type<Array<(typeof publicSections)[number]>>()
+    .notNull(),
+  updatedAt: int("updated_at").notNull(),
+})
+
+export type AuthUser = typeof authUser.$inferSelect
+export type AuthSession = typeof authSession.$inferSelect
+export type AuthAccount = typeof authAccount.$inferSelect
+export type AuthVerification = typeof authVerification.$inferSelect
+export type AccessGrant = typeof accessGrants.$inferSelect
+export type SitePublicView = typeof sitePublicViews.$inferSelect
+export const selectAuthUserSchema = createSelectSchema(authUser)
+export const selectAuthSessionSchema = createSelectSchema(authSession)
+export const selectAuthAccountSchema = createSelectSchema(authAccount)
+export const selectAuthVerificationSchema = createSelectSchema(authVerification)
+export const selectAccessGrantSchema = createSelectSchema(accessGrants)
+export const insertAccessGrantSchema = createInsertSchema(accessGrants, {
+  email: (field) =>
+    field
+      .email()
+      .max(254)
+      .transform((value) => value.trim().toLowerCase()),
+}).pick({ email: true, role: true })
+export const selectSitePublicViewSchema = createSelectSchema(sitePublicViews)
+export const insertSitePublicViewSchema = createInsertSchema(sitePublicViews, {
+  slug: (field) =>
+    field
+      .min(3)
+      .max(80)
+      .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  enabled: z.boolean(),
+  metrics: z.array(z.enum(publicMetrics)).max(publicMetrics.length),
+  sections: z.array(z.enum(publicSections)).max(publicSections.length),
+})
+  .pick({ slug: true, enabled: true, metrics: true, sections: true })
+  .required()
+  .strict()
+  .refine(
+    (value) =>
+      !value.enabled || value.metrics.length + value.sections.length > 0,
+    { message: "Choose at least one metric or section to publish." }
+  )
 
 export const visitors = sqliteTable(
   "visitors",
