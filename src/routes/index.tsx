@@ -176,25 +176,35 @@ function AccountMenu({ email, isAdmin }: { email: string; isAdmin: boolean }) {
           />
         }
       />
-      <DropdownMenu.Content align="end" className="t-dropdown min-w-56">
-        <div className="px-3 py-2 text-xs text-kumo-subtle">
-          {email}
-          <br />
-          {isAdmin ? "Admin" : "Viewer"}
+      <DropdownMenu.Content
+        align="end"
+        className="t-dropdown t-dropdown-origin-top-right w-72 max-w-[calc(100vw-32px)] p-0"
+      >
+        <div className="space-y-2 px-3.5 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs text-kumo-subtle">Signed in as</p>
+            <Badge variant={isAdmin ? "primary" : "secondary"}>
+              {isAdmin ? "Admin" : "Viewer"}
+            </Badge>
+          </div>
+          <p className="text-sm font-medium break-all">{email}</p>
         </div>
-        {isAdmin && (
-          <DropdownMenu.Item onClick={() => navigate({ to: "/admin/users" })}>
-            Manage user access
+        <DropdownMenu.Separator className="mx-0 my-0" />
+        <DropdownMenu.Group className="p-1.5">
+          {isAdmin && (
+            <DropdownMenu.Item onClick={() => navigate({ to: "/admin/users" })}>
+              Manage user access
+            </DropdownMenu.Item>
+          )}
+          <DropdownMenu.Item
+            onClick={async () => {
+              await authClient.signOut()
+              window.location.assign("/login")
+            }}
+          >
+            Sign out
           </DropdownMenu.Item>
-        )}
-        <DropdownMenu.Item
-          onClick={async () => {
-            await authClient.signOut()
-            window.location.assign("/login")
-          }}
-        >
-          Sign out
-        </DropdownMenu.Item>
+        </DropdownMenu.Group>
       </DropdownMenu.Content>
     </DropdownMenu>
   )
@@ -353,19 +363,19 @@ function App() {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4 p-4 sm:p-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex max-w-full min-w-0 items-center gap-2">
           <DropdownMenu>
             <DropdownMenu.Trigger
               render={
                 <Button
                   variant="ghost"
-                  className="-ml-2 max-w-full min-w-0 justify-start pr-4 pl-2"
+                  className="-ml-2 max-w-full min-w-0 shrink justify-start px-2"
                   aria-label={`Switch site. Current site: ${selectedSite.name}`}
                 >
                   <SourceIcon domain={selectedSite.domain} />
-                  <p className="max-w-52 shrink-0 font-semibold">
+                  <span className="max-w-52 truncate font-semibold">
                     {selectedSite.name}
-                  </p>
+                  </span>
                   <CaretDownIcon
                     className="size-4 shrink-0 text-neutral-500"
                     weight="bold"
@@ -404,7 +414,11 @@ function App() {
             </DropdownMenu.Content>
           </DropdownMenu>
           {liveVisitors.count !== null && liveVisitors.count > 0 ? (
-            <Badge variant="success" appearance="dot">
+            <Badge
+              variant="success"
+              appearance="dot"
+              className="shrink-0 whitespace-nowrap"
+            >
               {liveVisitors.count} online
             </Badge>
           ) : null}

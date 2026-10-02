@@ -4,10 +4,10 @@ import { DropdownMenu } from "@cloudflare/kumo/components/dropdown"
 import { CaretDownIcon } from "@phosphor-icons/react"
 import { createFileRoute, notFound, useNavigate } from "@tanstack/react-router"
 import { createServerFn } from "@tanstack/react-start"
-import { useEffect, useState } from "react"
 import { z } from "zod"
 import { PublicDashboard } from "@/components/dashboard/public-dashboard"
 import { SourceIcon } from "@/components/dashboard/icons"
+import { usePublicRealtime } from "@/hooks/use-public-realtime"
 
 const ranges = ["today", "7d", "30d", "6m", "1y"] as const
 const rangeLabels = [
@@ -57,50 +57,29 @@ function PublicView() {
   const { slug } = Route.useParams()
   const { range = "30d" } = Route.useSearch()
   const navigate = useNavigate()
-  const [live, setLive] = useState(snapshot.realtime)
-  useEffect(() => {
-    setLive(snapshot.realtime)
-    if (snapshot.realtime === undefined) return
-    const controller = new AbortController()
-    const interval = window.setInterval(async () => {
-      try {
-        const response = await fetch(
-          `/api/public/${encodeURIComponent(slug)}/realtime`,
-          { signal: controller.signal }
-        )
-        if (response.ok)
-          setLive(
-            z
-              .object({ count: z.number().int().nonnegative() })
-              .parse(await response.json()).count
-          )
-        else {
-          setLive(undefined)
-          window.clearInterval(interval)
-        }
-      } catch {
-        /* Keep the last count during temporary connection failures. */
-      }
-    }, 20_000)
-    return () => {
-      controller.abort()
-      window.clearInterval(interval)
-    }
-  }, [slug, snapshot.realtime])
+  const live = usePublicRealtime(
+    slug,
+    snapshot.realtime,
+    snapshot.realtimeLocations
+  )
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-4 p-4 sm:p-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex max-w-full min-w-0 items-center gap-2">
           <SourceIcon domain={snapshot.site.domain} />
           <h1
-            className="max-w-52 shrink-0 font-semibold"
+            className="max-w-52 min-w-0 truncate font-semibold"
             title={snapshot.site.domain}
           >
             {snapshot.site.name}
           </h1>
-          {live !== undefined && live > 0 && (
-            <Badge appearance="dot" variant="success">
-              {live} online
+          {!live.unavailable && live.count !== undefined && live.count > 0 && (
+            <Badge
+              appearance="dot"
+              variant="success"
+              className="shrink-0 whitespace-nowrap"
+            >
+              {live.count} online
             </Badge>
           )}
         </div>
@@ -139,7 +118,19 @@ function PublicView() {
           </DropdownMenu.Content>
         </DropdownMenu>
       </header>
-      <PublicDashboard snapshot={snapshot} />
+      {live.unavailable && (
+        <p role="status" className="text-xs text-kumo-subtle">
+          Live updates temporarily unavailable. Showing last known data.
+          Retrying…
+        </p>
+      )}
+      <PublicDashboard
+        snapshot={{
+          ...snapshot,
+          realtime: live.count,
+          realtimeLocations: live.locations,
+        }}
+      />
       <p className="text-center text-xs text-kumo-subtle">
         {snapshot.range.fromDate} to {snapshot.range.toDate} · Shared by the
         website owner

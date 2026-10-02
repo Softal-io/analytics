@@ -1,4 +1,5 @@
 import type { PublicMetric, PublicSection } from "@/lib/public-options"
+import type { RealtimeVisitorLocation } from "@/lib/realtime"
 
 export interface PublicList {
   rows: Array<{ label: string; count: number; country?: string }>
@@ -11,6 +12,7 @@ export interface PublicSnapshot {
   sections: Partial<Record<PublicSection, PublicList>>
   chart?: Array<{ timestamp: number; visitors: number; pageviews: number }>
   realtime?: number
+  realtimeLocations?: Array<RealtimeVisitorLocation>
 }
 
 /** Copy selected numbers explicitly; never serialize an internal summary. */

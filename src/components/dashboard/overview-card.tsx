@@ -69,7 +69,7 @@ export function OverviewCard({
       <LayerCard.Secondary>Overview</LayerCard.Secondary>
       <LayerCard.Primary className="h-full p-2.5">
         {metrics.length > 0 && (
-          <div className="mb-3 flex flex-wrap divide-x divide-neutral-100 px-1">
+          <div className="mb-3 grid grid-cols-2 gap-y-3 px-1 sm:flex sm:flex-wrap">
             {metrics.map((metric, index) => {
               const value = summary[metric] ?? 0
               return (
@@ -83,7 +83,15 @@ export function OverviewCard({
                         ? formatDuration(value)
                         : formatCompactNumber(value)
                   }
-                  className={`min-w-32 ${index === 0 ? "pr-4" : index === metrics.length - 1 ? "pl-4" : "px-4"}`}
+                  className={`min-w-0 border-neutral-100 sm:flex-1 ${
+                    index % 2 === 0 ? "pr-4" : "border-l pl-4"
+                  } ${
+                    index === 0
+                      ? "sm:border-l-0 sm:pr-4 sm:pl-0"
+                      : index === metrics.length - 1
+                        ? "sm:border-l sm:pr-0 sm:pl-4"
+                        : "sm:border-l sm:px-4"
+                  }`}
                 />
               )
             })}

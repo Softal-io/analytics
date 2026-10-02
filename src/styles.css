@@ -16,6 +16,31 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+.card-header-tabs {
+  --tabs-fade-left: 0px;
+  --tabs-fade-right: 0px;
+  scrollbar-width: none;
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    black var(--tabs-fade-left),
+    black calc(100% - var(--tabs-fade-right)),
+    transparent
+  );
+}
+
+.card-header-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.card-header-tabs[data-overflow-left] {
+  --tabs-fade-left: 12px;
+}
+
+.card-header-tabs[data-overflow-right] {
+  --tabs-fade-right: 12px;
+}
+
 /* Transitions.dev-inspired motion adapted to Kumo's data-state lifecycle. */
 .t-dropdown {
   animation: none !important;
@@ -31,8 +56,7 @@
 }
 
 .t-dropdown[data-open] {
-  animation: t-dropdown-open var(--dropdown-open-dur) var(--dropdown-ease)
-    both !important;
+  animation: t-dropdown-open var(--dropdown-open-dur) var(--dropdown-ease) both !important;
   pointer-events: auto;
 }
 
@@ -67,8 +91,7 @@
 }
 
 .ranked-list-filter-enter {
-  animation: ranked-list-filter-enter 180ms cubic-bezier(0.23, 1, 0.32, 1)
-    both;
+  animation: ranked-list-filter-enter 180ms cubic-bezier(0.23, 1, 0.32, 1) both;
 }
 
 @keyframes ranked-list-filter-enter {

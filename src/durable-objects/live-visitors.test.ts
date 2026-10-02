@@ -48,6 +48,21 @@ function createState(sockets: Array<TestSocket> = []) {
 }
 
 describe("live visitor persistence", () => {
+  it("returns grouped live locations and expires them in polling snapshots", async () => {
+    vi.useFakeTimers()
+    const { state, database } = createState()
+    const visitors = new LiveVisitors(state, {} as Env)
+    await visitors.ping("one", { latitude: 53.3, longitude: -6.2 })
+    await visitors.ping("two", { latitude: 53.3, longitude: -6.2 })
+    await visitors.ping("unknown")
+    expect(await visitors.snapshot()).toEqual({
+      count: 3,
+      locations: [{ latitude: 53.3, longitude: -6.2, count: 2 }],
+    })
+    vi.advanceTimersByTime(5 * 60 * 1000 + 1)
+    expect(await visitors.snapshot()).toEqual({ count: 0, locations: [] })
+    database.close()
+  })
   beforeEach(() => {
     access.valid = new Set(["session"])
     access.fail = false

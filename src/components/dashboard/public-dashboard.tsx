@@ -1,4 +1,5 @@
 import { LayerCard } from "@cloudflare/kumo/components/layer-card"
+import { GlobeIcon } from "@phosphor-icons/react"
 import { useState } from "react"
 import type { PublicSection } from "@/lib/public-options"
 import type { PublicSnapshot } from "@/lib/public-snapshot"
@@ -11,9 +12,13 @@ import {
 import { CountryFlag, SourceIcon } from "@/components/dashboard/icons"
 import { OverviewCard } from "@/components/dashboard/overview-card"
 import { RankedList } from "@/components/dashboard/ranked-list"
+import { RealtimeGlobe } from "@/components/dashboard/realtime-globe"
 import { publicMetrics } from "@/lib/public-options"
 
-type ListSection = Exclude<PublicSection, "chart" | "realtime">
+type ListSection = Exclude<
+  PublicSection,
+  "chart" | "realtime" | "realtimeGlobe"
+>
 interface PublicTab {
   value: ListSection
   label: string
@@ -44,59 +49,89 @@ function PublicListCard({
   title,
   tabs,
   sections,
+  realtime,
+  realtimeLocations,
 }: {
   title: string
   tabs: Array<PublicTab>
   sections: PublicSnapshot["sections"]
+  realtime?: number
+  realtimeLocations?: PublicSnapshot["realtimeLocations"]
 }) {
   const [selected, setSelected] = useState(tabs[0].value)
   const [animateItems, setAnimateItems] = useState(false)
+  const [showGlobe, setShowGlobe] = useState(false)
   const visibleTabs = tabs.filter((tab) => sections[tab.value] !== undefined)
   if (visibleTabs.length === 0) return null
   const active =
     visibleTabs.find((tab) => tab.value === selected) ?? visibleTabs[0]
   const list = sections[active.value]!
+  const hasGlobe =
+    title === "Locations" &&
+    realtime !== undefined &&
+    realtimeLocations !== undefined
+  const globeActive = hasGlobe && showGlobe
 
   return (
     <LayerCard role="region" aria-label={title}>
       <LayerCard.Secondary>
         <CardHeader
           title={title}
-          tabs={visibleTabs}
-          value={active.value}
+          tabs={
+            hasGlobe
+              ? [
+                  ...visibleTabs,
+                  {
+                    value: "globe",
+                    label: <GlobeIcon className="size-4" />,
+                    ariaLabel: "Realtime visitor globe",
+                    title: "Realtime visitor globe",
+                  },
+                ]
+              : visibleTabs
+          }
+          value={globeActive ? "globe" : active.value}
           onValueChange={(value, animate) => {
+            setShowGlobe(value === "globe")
+            if (value === "globe") return
             setSelected(value as ListSection)
             setAnimateItems(animate)
           }}
         />
       </LayerCard.Secondary>
-      <LayerCard.Primary className="h-full p-2.5">
-        <RankedList
-          key={active.value}
-          items={list.rows.map((row, index) => ({
-            key: `${index}:${row.label}`,
-            label:
-              active.value === "deviceTypes"
-                ? row.label.charAt(0).toUpperCase() + row.label.slice(1)
-                : row.label,
-            icon:
-              active.value === "referrers" ? (
-                <SourceIcon domain={row.label} />
-              ) : active.value === "browsers" ? (
-                <BrowserMark browser={row.label} />
-              ) : active.value === "operatingSystems" ? (
-                <OsMark os={row.label} />
-              ) : active.value === "deviceTypes" ? (
-                <DeviceMark device={row.label} />
-              ) : row.country ? (
-                <CountryFlag country={row.country} />
-              ) : undefined,
-            value: row.count,
-          }))}
-          total={list.total}
-          emptyLabel={active.emptyLabel}
-          animateItems={animateItems}
-        />
+      <LayerCard.Primary
+        className={globeActive ? "h-80 overflow-hidden p-0" : "h-full p-2.5"}
+      >
+        {globeActive ? (
+          <RealtimeGlobe count={realtime} locations={realtimeLocations} />
+        ) : (
+          <RankedList
+            key={active.value}
+            items={list.rows.map((row, index) => ({
+              key: `${index}:${row.label}`,
+              label:
+                active.value === "deviceTypes"
+                  ? row.label.charAt(0).toUpperCase() + row.label.slice(1)
+                  : row.label,
+              icon:
+                active.value === "referrers" ? (
+                  <SourceIcon domain={row.label} />
+                ) : active.value === "browsers" ? (
+                  <BrowserMark browser={row.label} />
+                ) : active.value === "operatingSystems" ? (
+                  <OsMark os={row.label} />
+                ) : active.value === "deviceTypes" ? (
+                  <DeviceMark device={row.label} />
+                ) : row.country ? (
+                  <CountryFlag country={row.country} />
+                ) : undefined,
+              value: row.count,
+            }))}
+            total={list.total}
+            emptyLabel={active.emptyLabel}
+            animateItems={animateItems}
+          />
+        )}
       </LayerCard.Primary>
     </LayerCard>
   )
@@ -133,6 +168,8 @@ export function PublicDashboard({ snapshot }: { snapshot: PublicSnapshot }) {
           title="Locations"
           tabs={locationTabs}
           sections={snapshot.sections}
+          realtime={snapshot.realtime}
+          realtimeLocations={snapshot.realtimeLocations}
         />
         {snapshot.sections.events !== undefined && (
           <LayerCard className="sm:col-span-2">

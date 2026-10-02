@@ -14,6 +14,14 @@ for daily rollups, Kumo (`@cloudflare/kumo`) for the dashboard UI.
 > [!NOTE]
 > If you do not want to use D1, please tell your agent to replace it with your own Postgres/MySQL DB and put Cloudflare Hyperdrive on top of it.
 
+## What's different in this fork
+
+- **Authentication and access control:** Google sign-in via Better Auth, admin and read-only viewer roles, and user access management through the dashboard or CLI.
+- **Public analytics views:** Share selected metrics and sections at a custom public URL, with no sign-in required and a layout matching the private dashboard.
+- **Icon and flag fixes:** Correct country flag URLs and consistent country, browser, OS, and device icons across private and public views.
+- **Reliable live counts:** Active visitor presence survives Durable Object eviction and WebSocket hibernation; live connections close when access is revoked or sessions expire.
+- **Private deployment configuration:** Git-ignored `wrangler.local.jsonc` support keeps deployment-specific settings out of the shared template.
+
 ## First-time setup
 
 ```bash

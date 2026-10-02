@@ -20,6 +20,7 @@ import {
   computeTopSources,
 } from "@/lib/top-lists"
 import { publicLocationLabel, selectPublicMetrics } from "@/lib/public-snapshot"
+import { canShareRealtimeGlobe } from "@/lib/public-options"
 
 export async function loadPublicView(slug: string) {
   return db
@@ -30,6 +31,20 @@ export async function loadPublicView(slug: string) {
       and(eq(sitePublicViews.slug, slug), eq(sitePublicViews.enabled, true))
     )
     .get()
+}
+
+export async function loadPublicRealtime(
+  view: NonNullable<Awaited<ReturnType<typeof loadPublicView>>>
+) {
+  const visitors = env.LIVE_VISITORS.get(
+    env.LIVE_VISITORS.idFromName(view.site.id)
+  )
+  const sharesLocations =
+    view.settings.sections.includes("realtimeGlobe") &&
+    canShareRealtimeGlobe(view.settings.sections)
+  if (!sharesLocations) return { count: await visitors.count() }
+  const { count, locations } = await visitors.snapshot()
+  return { count, locations }
 }
 
 export async function loadPublicSnapshot(
@@ -66,11 +81,10 @@ export async function loadPublicSnapshot(
       )
     } else if (section === "realtime") {
       queries.push(
-        env.LIVE_VISITORS.get(env.LIVE_VISITORS.idFromName(site.id))
-          .count()
-          .then((count) => {
-            snapshot.realtime = count
-          })
+        loadPublicRealtime(view).then(({ count, locations }) => {
+          snapshot.realtime = count
+          if (locations !== undefined) snapshot.realtimeLocations = locations
+        })
       )
     } else if (section === "pages") {
       queries.push(
@@ -137,7 +151,11 @@ export async function loadPublicSnapshot(
           }
         })
       )
-    } else {
+    } else if (
+      section === "countries" ||
+      section === "regions" ||
+      section === "cities"
+    ) {
       const dimension: LocationDimension =
         section === "countries"
           ? "country"

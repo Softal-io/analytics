@@ -19,6 +19,7 @@ export const publicSections = [
   "cities",
   "events",
   "realtime",
+  "realtimeGlobe",
 ] as const
 export type PublicMetric = (typeof publicMetrics)[number]
 export type PublicSection = (typeof publicSections)[number]
@@ -43,7 +44,12 @@ export const sectionLabels: Record<PublicSection, string> = {
   cities: "Cities",
   events: "Custom events",
   realtime: "Live visitor count",
+  realtimeGlobe: "Live location globe",
 }
+export function canShareRealtimeGlobe(sections: ReadonlyArray<PublicSection>) {
+  return sections.includes("realtime") && sections.includes("cities")
+}
+
 export interface PublicViewSettings {
   slug: string
   enabled: boolean

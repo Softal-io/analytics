@@ -1,10 +1,12 @@
 import { Button } from "@cloudflare/kumo/components/button"
 import { Dialog } from "@cloudflare/kumo/components/dialog"
 import { Input } from "@cloudflare/kumo/components/input"
+import { CheckIcon, CopyIcon } from "@phosphor-icons/react"
 import { useEffect, useState } from "react"
 import { z } from "zod"
 import type { PublicViewSettings } from "@/lib/public-options"
 import {
+  canShareRealtimeGlobe,
   metricLabels,
   publicMetrics,
   publicSections,
@@ -93,7 +95,7 @@ export function PublicViewDialog({
   }
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog className="w-[calc(100vw-32px)] max-w-xl min-w-0 bg-kumo-base p-0">
+      <Dialog className="w-[calc(100vw-32px)] max-w-xl min-w-0 bg-kumo-base p-0 sm:w-xl">
         <form
           onSubmit={save}
           className="flex max-h-[calc(100svh-32px)] flex-col"
@@ -177,16 +179,25 @@ export function PublicViewDialog({
                         <input
                           type="checkbox"
                           checked={settings.sections.includes(section)}
-                          onChange={(event) =>
+                          disabled={
+                            section === "realtimeGlobe" &&
+                            !canShareRealtimeGlobe(settings.sections)
+                          }
+                          onChange={(event) => {
+                            const sections = event.target.checked
+                              ? [...settings.sections, section]
+                              : settings.sections.filter(
+                                  (value) => value !== section
+                                )
                             setSettings({
                               ...settings,
-                              sections: event.target.checked
-                                ? [...settings.sections, section]
-                                : settings.sections.filter(
-                                    (value) => value !== section
+                              sections: canShareRealtimeGlobe(sections)
+                                ? sections
+                                : sections.filter(
+                                    (value) => value !== "realtimeGlobe"
                                   ),
                             })
-                          }
+                          }}
                         />
                         {sectionLabels[section]}
                       </label>
@@ -195,17 +206,19 @@ export function PublicViewDialog({
                 </fieldset>
                 <p className="text-xs text-kumo-subtle">
                   The traffic chart includes visitors and pageviews. Location
-                  sections share only their selected granularity; live visitors
-                  shares a count. Public views always include the website name
-                  and domain.
+                  sections share their selected granularity. The live location
+                  globe shares approximate city-level locations and requires
+                  Cities and Live visitor count. It is shared only when its
+                  checkbox is selected. Public views always include the website
+                  name and domain.
                 </p>
               </>
             )}
             {savedUrl && (
-              <div className="space-y-2 rounded-lg bg-kumo-tint p-3">
+              <div className="flex flex-col gap-3 rounded-lg bg-kumo-tint p-3">
                 <p className="text-sm font-medium">Saved public link</p>
                 <a
-                  className="text-sm break-all underline"
+                  className="text-sm leading-relaxed break-all underline decoration-kumo-line underline-offset-4 hover:decoration-current"
                   href={savedUrl}
                   target="_blank"
                   rel="noreferrer"
@@ -216,6 +229,8 @@ export function PublicViewDialog({
                   type="button"
                   size="sm"
                   variant="secondary"
+                  className="self-end"
+                  icon={copied ? <CheckIcon /> : <CopyIcon />}
                   onClick={async () => {
                     try {
                       await navigator.clipboard.writeText(savedUrl)

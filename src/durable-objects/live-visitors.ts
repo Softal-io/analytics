@@ -124,6 +124,12 @@ export class LiveVisitors extends DurableObject<Env> {
     return this.lastSeen.size
   }
 
+  /** Live count and grouped approximate locations for public dashboard polling. */
+  async snapshot(): Promise<RealtimeVisitorsPayload> {
+    if (this.sweepExpiredVisitors()) await this.broadcast()
+    return this.payload()
+  }
+
   /** WebSocket upgrade — proxied here from `/api/sites/:id/realtime/ws`. */
   async fetch(request: Request): Promise<Response> {
     if (request.headers.get("Upgrade") !== "websocket") {

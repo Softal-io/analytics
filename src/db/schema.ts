@@ -9,7 +9,11 @@ import {
 } from "drizzle-orm/sqlite-core"
 import { createInsertSchema, createSelectSchema } from "drizzle-zod"
 import { z } from "zod"
-import { publicMetrics, publicSections } from "@/lib/public-options"
+import {
+  canShareRealtimeGlobe,
+  publicMetrics,
+  publicSections,
+} from "@/lib/public-options"
 
 /**
  * Personal Web Analytics — data model.
@@ -168,6 +172,15 @@ export const insertSitePublicViewSchema = createInsertSchema(sitePublicViews, {
     (value) =>
       !value.enabled || value.metrics.length + value.sections.length > 0,
     { message: "Choose at least one metric or section to publish." }
+  )
+  .refine(
+    (value) =>
+      !value.sections.includes("realtimeGlobe") ||
+      canShareRealtimeGlobe(value.sections),
+    {
+      message:
+        "The live location globe requires Cities and Live visitor count.",
+    }
   )
 
 export const visitors = sqliteTable(

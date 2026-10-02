@@ -3,6 +3,31 @@ import { publicLocationLabel, selectPublicMetrics } from "@/lib/public-snapshot"
 import { insertSitePublicViewSchema } from "@/db/schema"
 
 describe("public analytics privacy", () => {
+  it("requires city sharing and live counts before the globe can be published", () => {
+    const settings = { slug: "fixture", enabled: true, metrics: [] }
+    for (const sections of [
+      ["realtimeGlobe"],
+      ["countries", "realtime", "realtimeGlobe"],
+      ["regions", "realtime", "realtimeGlobe"],
+      ["cities", "realtimeGlobe"],
+    ]) {
+      expect(
+        insertSitePublicViewSchema.safeParse({ ...settings, sections }).success
+      ).toBe(false)
+    }
+    expect(
+      insertSitePublicViewSchema.safeParse({
+        ...settings,
+        sections: ["cities", "realtime", "realtimeGlobe"],
+      }).success
+    ).toBe(true)
+    expect(
+      insertSitePublicViewSchema.safeParse({
+        ...settings,
+        sections: ["countries", "realtime"],
+      }).success
+    ).toBe(true)
+  })
   it("does not expose unchecked overview metrics", () => {
     const summary = {
       visitors: 40,

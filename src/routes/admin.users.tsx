@@ -5,6 +5,39 @@ import { Link, createFileRoute, useRouter } from "@tanstack/react-router"
 import { createServerFn } from "@tanstack/react-start"
 import { useState } from "react"
 import { z } from "zod"
+import { CaretDownIcon } from "@phosphor-icons/react"
+
+function RoleSelect({
+  label,
+  value,
+  disabled,
+  onChange,
+}: {
+  label: string
+  value: string
+  disabled: boolean
+  onChange: (value: string) => void
+}) {
+  return (
+    <div className="relative w-28 shrink-0">
+      <select
+        aria-label={label}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-9 w-full cursor-pointer appearance-none rounded-lg bg-kumo-base pr-9 pl-3 text-base font-normal ring ring-kumo-line hover:bg-kumo-tint focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-kumo-brand disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <option value="viewer">Viewer</option>
+        <option value="admin">Admin</option>
+      </select>
+      <CaretDownIcon
+        aria-hidden="true"
+        className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-neutral-500"
+        weight="bold"
+      />
+    </div>
+  )
+}
 
 const getAccessList = createServerFn().handler(async () => {
   const { requireAdmin } = await import("@/lib/access")
@@ -70,7 +103,7 @@ function Users() {
   }
   return (
     <main className="mx-auto max-w-3xl space-y-5 p-4 sm:p-6">
-      <header className="flex items-center justify-between">
+      <header className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold">User access</h1>
         <Link to="/" className="text-sm underline">
           Back to analytics
@@ -91,25 +124,26 @@ function Users() {
               void update("PUT", email, role)
             }}
           >
-            <Input
-              label="Google email"
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="name@example.com"
-              required
-            />
-            <label className="grid gap-1 text-sm">
+            <div className="min-w-0 flex-1 basis-60">
+              <Input
+                label="Google email"
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="name@example.com"
+                className="w-full"
+                disabled={pending}
+                required
+              />
+            </div>
+            <label className="grid gap-2 text-base font-medium">
               Role
-              <select
-                aria-label="New user role"
+              <RoleSelect
+                label="New user role"
                 value={role}
-                onChange={(event) => setRole(event.target.value)}
-                className="h-9 rounded-md bg-kumo-base px-3 ring ring-kumo-line"
-              >
-                <option value="viewer">Viewer</option>
-                <option value="admin">Admin</option>
-              </select>
+                disabled={pending}
+                onChange={setRole}
+              />
             </label>
             <Button
               type="submit"
@@ -142,22 +176,16 @@ function Users() {
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <select
-                  aria-label={`Role for ${user.email}`}
+                <RoleSelect
+                  label={`Role for ${user.email}`}
                   value={user.role}
                   disabled={pending}
-                  onChange={(event) =>
-                    void update("PUT", user.email, event.target.value)
-                  }
-                  className="rounded-md bg-kumo-base px-3 py-2 text-sm ring ring-kumo-line"
-                >
-                  <option value="viewer">Viewer</option>
-                  <option value="admin">Admin</option>
-                </select>
+                  onChange={(value) => void update("PUT", user.email, value)}
+                />
                 <Button
-                  variant="secondary"
-                  size="sm"
+                  variant="destructive"
                   disabled={pending}
+                  aria-label={`Revoke access for ${user.email}`}
                   onClick={() => void update("DELETE", user.email)}
                 >
                   Revoke

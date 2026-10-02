@@ -12,6 +12,19 @@ import type { PublicSnapshot } from "@/lib/public-snapshot"
 import { PublicDashboard } from "@/components/dashboard/public-dashboard"
 
 vi.mock("@/lib/echarts", () => ({ echarts: {} }))
+vi.mock("@/components/dashboard/realtime-globe", () => ({
+  RealtimeGlobe: ({
+    count,
+    locations,
+  }: {
+    count: number
+    locations: Array<unknown>
+  }) => (
+    <div aria-label="Live globe">
+      {count} online, {locations.length} locations
+    </div>
+  ),
+}))
 vi.mock("@cloudflare/kumo/components/chart", async (importOriginal) => {
   const original = await importOriginal<typeof ChartModule>()
   return {
@@ -46,6 +59,36 @@ afterEach(() => {
 })
 
 describe("public dashboard sharing controls", () => {
+  it("shows the live globe, updates its data, and removes it when sharing is withdrawn", () => {
+    const data = snapshot({
+      realtime: 2,
+      realtimeLocations: [{ latitude: 53.3, longitude: -6.2, count: 2 }],
+      sections: { countries: list("Ireland") },
+    })
+    const { rerender } = render(<PublicDashboard snapshot={data} />)
+    fireEvent.click(
+      screen.getByRole("button", { name: "Realtime visitor globe" })
+    )
+    expect(screen.getByLabelText("Live globe").textContent).toBe(
+      "2 online, 1 locations"
+    )
+    rerender(
+      <PublicDashboard
+        snapshot={{ ...data, realtime: 0, realtimeLocations: [] }}
+      />
+    )
+    expect(screen.getByLabelText("Live globe").textContent).toBe(
+      "0 online, 0 locations"
+    )
+    rerender(
+      <PublicDashboard snapshot={{ ...data, realtimeLocations: undefined }} />
+    )
+    expect(screen.queryByLabelText("Live globe")).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: "Realtime visitor globe" })
+    ).toBeNull()
+    expect(screen.getByText("Ireland")).toBeDefined()
+  })
   it("groups source views into one card and switches their visible rows", () => {
     render(
       <PublicDashboard
