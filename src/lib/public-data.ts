@@ -151,6 +151,7 @@ export async function loadPublicSnapshot(
             rows: list.rows.map((row) => ({
               label: publicLocationLabel(section, row),
               count: row.visits,
+              country: row.country,
             })),
           }
         })

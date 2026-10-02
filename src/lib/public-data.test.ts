@@ -74,4 +74,22 @@ describe("public event totals", () => {
     database.exec("UPDATE site_public_views SET enabled = 0")
     expect(await loadPublicSnapshot("public-fixture", "7d")).toBeNull()
   })
+  it("includes country flags without exposing unchecked regions or cities", async () => {
+    database.exec(`UPDATE site_public_views SET sections = '["countries"]'`)
+    const pastDay = new Date(Date.now() - 2 * 86400000)
+      .toISOString()
+      .slice(0, 10)
+    database
+      .prepare("INSERT INTO daily_locations VALUES (?, ?, ?, ?, ?, ?)")
+      .run("site", pastDay, "IE", "Leinster", "Dublin", 8)
+    const snapshot = await loadPublicSnapshot("public-fixture", "7d")
+    expect(snapshot?.sections).toEqual({
+      countries: {
+        rows: [{ label: "Ireland", count: 8, country: "IE" }],
+        total: 8,
+      },
+    })
+    expect(JSON.stringify(snapshot)).not.toContain("Leinster")
+    expect(JSON.stringify(snapshot)).not.toContain("Dublin")
+  })
 })

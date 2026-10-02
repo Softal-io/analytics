@@ -8,7 +8,7 @@ import {
   DeviceMark,
   OsMark,
 } from "@/components/dashboard/device-icons"
-import { SourceIcon } from "@/components/dashboard/icons"
+import { CountryFlag, SourceIcon } from "@/components/dashboard/icons"
 import { OverviewCard } from "@/components/dashboard/overview-card"
 import { RankedList } from "@/components/dashboard/ranked-list"
 import { publicMetrics } from "@/lib/public-options"
@@ -88,6 +88,8 @@ function PublicListCard({
                 <OsMark os={row.label} />
               ) : active.value === "deviceTypes" ? (
                 <DeviceMark device={row.label} />
+              ) : row.country ? (
+                <CountryFlag country={row.country} />
               ) : undefined,
             value: row.count,
           }))}

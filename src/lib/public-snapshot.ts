@@ -1,7 +1,7 @@
 import type { PublicMetric, PublicSection } from "@/lib/public-options"
 
 export interface PublicList {
-  rows: Array<{ label: string; count: number }>
+  rows: Array<{ label: string; count: number; country?: string }>
   total: number
 }
 export interface PublicSnapshot {
