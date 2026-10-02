@@ -363,7 +363,7 @@ function App() {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4 p-4 sm:p-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex max-w-full min-w-0 items-center gap-2">
+        <div className="flex min-w-0 flex-1 basis-full items-center gap-2 sm:basis-0">
           <DropdownMenu>
             <DropdownMenu.Trigger
               render={
@@ -373,7 +373,7 @@ function App() {
                   aria-label={`Switch site. Current site: ${selectedSite.name}`}
                 >
                   <SourceIcon domain={selectedSite.domain} />
-                  <span className="max-w-52 truncate font-semibold">
+                  <span className="min-w-0 truncate font-semibold">
                     {selectedSite.name}
                   </span>
                   <CaretDownIcon
@@ -424,7 +424,7 @@ function App() {
           ) : null}
         </div>
 
-        <div className="flex flex-wrap items-center gap-1">
+        <div className="flex shrink-0 flex-wrap items-center gap-1">
           {isAdmin && (
             <>
               <Button

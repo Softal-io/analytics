@@ -65,10 +65,10 @@ function PublicView() {
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-4 p-4 sm:p-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex max-w-full min-w-0 items-center gap-2">
+        <div className="flex min-w-0 flex-1 basis-full items-center gap-2 sm:basis-0">
           <SourceIcon domain={snapshot.site.domain} />
           <h1
-            className="max-w-52 min-w-0 truncate font-semibold"
+            className="min-w-0 truncate font-semibold"
             title={snapshot.site.domain}
           >
             {snapshot.site.name}
@@ -86,7 +86,11 @@ function PublicView() {
         <DropdownMenu>
           <DropdownMenu.Trigger
             render={
-              <Button variant="ghost" aria-label="Select date range">
+              <Button
+                variant="ghost"
+                className="shrink-0"
+                aria-label="Select date range"
+              >
                 {rangeLabels[ranges.indexOf(range)]}
                 <CaretDownIcon
                   className="size-4 text-neutral-500"
