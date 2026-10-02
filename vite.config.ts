@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs"
 import { defineConfig } from "vite"
 import { devtools } from "@tanstack/devtools-vite"
 import tsconfigPaths from "vite-tsconfig-paths"
@@ -6,8 +5,9 @@ import { tanstackStart } from "@tanstack/react-start/plugin/vite"
 import viteReact from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
 import { cloudflare } from "@cloudflare/vite-plugin"
+import { prepareDeploymentConfig } from "./scripts/deployment-config.mjs"
 
-const config = defineConfig({
+const config = defineConfig(({ command }) => ({
   environments: {
     ssr: {
       build: {
@@ -19,9 +19,7 @@ const config = defineConfig({
   plugins: [
     devtools(),
     cloudflare({
-      configPath: existsSync("wrangler.local.jsonc")
-        ? "wrangler.local.jsonc"
-        : "wrangler.jsonc",
+      configPath: prepareDeploymentConfig({ production: command === "build" }),
       viteEnvironment: { name: "ssr" },
     }),
     tsconfigPaths({ projects: ["./tsconfig.json"] }),
@@ -29,6 +27,6 @@ const config = defineConfig({
     tanstackStart(),
     viteReact(),
   ],
-})
+}))
 
 export default config

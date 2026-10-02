@@ -4,6 +4,7 @@
 
 # Better Auth uses Google sign-in. Keep all credentials server-side.
 BETTER_AUTH_URL="http://localhost:3000"
+TRACKER_ORIGIN="http://localhost:3000"
 BETTER_AUTH_SECRET="generate-a-random-secret-of-at-least-32-characters"
 GOOGLE_CLIENT_ID="your-client-id.apps.googleusercontent.com"
 GOOGLE_CLIENT_SECRET="your-client-secret"

@@ -28,7 +28,7 @@
     {
       "binding": "DB",
       "database_name": "web-analytics-db",
-      // Replace with the ID returned by `npm run cf -- d1 create web-analytics-db`.
+      // Supplied by D1_DATABASE_ID during preparation. Do not edit this placeholder.
       "database_id": "00000000-0000-0000-0000-000000000000",
       "migrations_dir": "drizzle"
     }

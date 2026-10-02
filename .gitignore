@@ -19,5 +19,7 @@ todos.json
 seed-output.sql
 .deployment-credentials.json
 
-# Deployment-specific domains, account IDs, and database IDs.
+# Private deployment inputs and generated Wrangler configuration.
+.deployment.env.local
 wrangler.local.jsonc
+wrangler.dev.local.jsonc

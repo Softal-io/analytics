@@ -20,7 +20,7 @@ for daily rollups, Kumo (`@cloudflare/kumo`) for the dashboard UI.
 - **Public analytics views:** Share selected metrics and sections at a custom public URL, with no sign-in required and a layout matching the private dashboard.
 - **Icon and flag fixes:** Correct country flag URLs and consistent country, browser, OS, and device icons across private and public views.
 - **Reliable live counts:** Active visitor presence survives Durable Object eviction and WebSocket hibernation; live connections close when access is revoked or sessions expire.
-- **Private deployment configuration:** Git-ignored `wrangler.local.jsonc` support keeps deployment-specific settings out of the shared template.
+- **Private deployment configuration:** Shared Wrangler structure, individual private build variables, and runtime secrets keep deployment details out of the public repository.
 
 ## First-time setup
 
@@ -28,17 +28,10 @@ for daily rollups, Kumo (`@cloudflare/kumo`) for the dashboard UI.
 # 1. install
 pnpm install   # or npm / yarn
 
-# 2. keep your deployment settings private
-cp wrangler.jsonc wrangler.local.jsonc
-
-# 3. create your D1 database
-npm run cf -- d1 create web-analytics-db
-# copy the printed database_id into wrangler.local.jsonc → d1_databases[0].database_id
-
-# 4. apply the included migrations locally
+# 2. apply the included migrations locally (no Cloudflare account needed)
 npm run db:migrate
 
-# 5. create your private local secrets file
+# 3. create your private local secrets file
 cp .dev.vars.example .dev.vars
 ```
 
@@ -132,7 +125,8 @@ authorized redirect URIs:
 
 Put `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `BETTER_AUTH_SECRET`, and the
 local `BETTER_AUTH_URL` in `.dev.vars`. Set production credentials as Worker
-secrets and keep the production URL in `wrangler.local.jsonc`. If the OAuth consent
+secrets. Set `ANALYTICS_ORIGIN` as a private build variable for the production URL
+(see [Deploying](#deploying)). If the OAuth consent
 screen is in Testing, include every Google account that will sign in as a test
 user, or publish the consent screen for those accounts.
 
@@ -235,7 +229,7 @@ npm run cf -- d1 execute DB --local --file=./seed-output.sql
 | script            | what it does                                                                                    |
 | ----------------- | ----------------------------------------------------------------------------------------------- |
 | `dev`             | Vite dev server with the Cloudflare plugin + local D1/DO (runs `db:migrate` first via `predev`) |
-| `build`           | Production build                                                                                |
+| `build`           | Validate deployment inputs, generate private Wrangler config, and build                         |
 | `preview`         | Build + serve via `vite preview`                                                                |
 | `deploy`          | Build + `wrangler deploy`                                                                       |
 | `cf-typegen`      | Regenerate `worker-configuration.d.ts` from `wrangler.jsonc`                                    |
@@ -245,7 +239,7 @@ npm run cf -- d1 execute DB --local --file=./seed-output.sql
 | `db:studio`       | Open Drizzle Studio                                                                             |
 | `typecheck`       | `tsc --noEmit`                                                                                  |
 | `access:grant`    | Grant an email admin or viewer access in local or remote D1                                     |
-| `cf`              | Run Wrangler using the private local config when present                                        |
+| `cf`              | Run Wrangler with generated config (or an explicit `--config` override)                         |
 
 ## Project layout
 
@@ -286,43 +280,111 @@ public/
 scripts/
   seed-demo-data.mjs         # generates realistic fake traffic for local dev
   grant-access.mjs           # grants admin/viewer access by email
-  wrangler.mjs               # selects private deployment config for Wrangler
+  deployment-config.mjs      # combines shared structure with private build inputs
+  wrangler.mjs               # prepares configuration for Wrangler commands
 drizzle/                     # generated SQL migrations
 wrangler.jsonc                # generic bindings, cron trigger, and Worker config
-wrangler.local.jsonc          # private deployment settings (Git-ignored)
+.deployment.env.example       # sample private deployment inputs
+.deployment.env.local         # your deployment inputs (Git-ignored)
+wrangler.local.jsonc          # generated configuration (Git-ignored; do not edit)
+wrangler.dev.local.jsonc      # generated local development config (Git-ignored)
 web-analytics-spec.md         # the full design spec this app implements
 ```
 
 ## Deploying
 
-`wrangler.jsonc` is a generic template. Copy it to `wrangler.local.jsonc`
-(as in first-time setup) and set your deployment's database ID, custom domain,
-`BETTER_AUTH_URL`, and `TRACKER_ORIGIN`. Both URLs should use your dashboard's
-origin. You can also set `account_id` if you have multiple Cloudflare accounts.
-Use a domain in your Cloudflare account for the custom domain route.
+`wrangler.jsonc` defines the shared Worker structure: bindings, compatibility
+flags, observability, and the cron trigger. Keep its sample domain and database
+ID generic. `scripts/deployment-config.mjs` reads it and generates the Git-ignored
+`wrangler.local.jsonc` for production builds and remote commands, and
+`wrangler.dev.local.jsonc` for local commands. Separate output files let local
+development and production builds run together. Do not edit these generated
+files; change the template or the private inputs instead.
 
-`wrangler.local.jsonc` and `.dev.vars` are Git-ignored. The dev server, build,
-deploy, migrations, access grants, and `npm run cf` automatically use the
-private config when it exists, otherwise they use `wrangler.jsonc`. To override
-it for a Wrangler command, pass `--config path/to/config.jsonc`.
+### What goes where
 
-Before your first deploy:
+| Setting                                                                  | Location                                                         |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| Bindings, Worker name, database name, compatibility flags, cron          | Committed `wrangler.jsonc`                                       |
+| `ANALYTICS_ORIGIN` (your HTTPS origin, without a path)                   | Private build variable; locally, `.deployment.env.local`         |
+| `D1_DATABASE_ID` (UUID from D1 creation)                                 | Private build variable; locally, `.deployment.env.local`         |
+| `CLOUDFLARE_ACCOUNT_ID` (optional if Wrangler identifies your account)   | Private build variable; locally, `.deployment.env.local`         |
+| `BETTER_AUTH_URL`, `TRACKER_ORIGIN`, custom domain route                 | Generated from `ANALYTICS_ORIGIN`                                |
+| `BETTER_AUTH_SECRET`, Google credentials, optional `ANALYTICS_API_TOKEN` | Worker runtime secrets; locally, `.dev.vars`                     |
+| Cloudflare deployment API token                                          | Cloudflare Builds' API token setting, or your CLI authentication |
 
-1. Create your D1 database and put its ID in `wrangler.local.jsonc`.
-2. Apply migrations to the remote DB: `npm run db:migrate:prod`.
-3. Set `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, and `GOOGLE_CLIENT_SECRET`
+The domain and resource IDs are deployment metadata, rather than credentials,
+but do not need to be published in Git. The domain will still be visible to
+visitors of the deployed application. Build variables are separate from runtime
+bindings: the preparer copies only the two derived URLs into `vars`; it never
+copies login credentials or API tokens.
+
+### First production deployment
+
+1. Create a D1 database: `npm run cf -- d1 create web-analytics-db`.
+2. Copy `.deployment.env.example` to `.deployment.env.local`. Replace
+   `ANALYTICS_ORIGIN` and `D1_DATABASE_ID` with your real values. Use a domain in
+   your Cloudflare account. Set the optional account ID if needed. If changing
+   the generic Worker or database name, edit `wrangler.jsonc` as well.
+3. Apply migrations to the remote DB: `npm run db:migrate:prod`.
+4. Set `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, and `GOOGLE_CLIENT_SECRET`
    using `npm run cf -- secret put NAME` for each secret. Generate a random
    auth secret and configure the Google redirect URLs described above.
-4. Grant your Google account admin access:
+5. Grant your Google account admin access:
    `npm run access:grant -- admin@example.com admin --remote`.
-5. Optionally enable the read-only integration API:
+6. Optionally enable the read-only integration API:
    `npm run cf -- secret put ANALYTICS_API_TOKEN`.
-6. Deploy: `npm run deploy`.
+7. Deploy: `npm run deploy`.
 
-The `LiveVisitors` Durable Object and daily cron trigger are already declared.
-After changing bindings, keep both config files' binding declarations in sync
-and run `npm run cf-typegen`. Type generation uses the generic template so
-tracked types do not contain private deployment settings.
+Production builds and remote database commands fail early when the domain or
+database ID is missing or invalid. Local development can run without production
+inputs, using localhost and local D1. When inputs are present, local commands
+use the same D1 ID so existing local data stays in the same database namespace.
+If you begin without production inputs, adding a real database ID later switches
+the local D1 namespace; recreate your local admin and demo data in that namespace.
+Local auth and tracker URLs can be overridden in `.dev.vars` as shown in the
+example. Environment variables override `.deployment.env.local`; CI ignores that
+local file entirely. An explicit `npm run cf -- ... --config path/to/config.jsonc`
+uses that file directly and bypasses preparation and validation.
+
+After changing bindings, edit only the shared template and run
+`npm run cf-typegen`. Type generation uses the generic template so tracked types
+do not contain private deployment metadata. Future builds automatically receive
+changes to the shared structure.
+
+### Cloudflare Workers Builds
+
+Connect your Git repository to the Worker and set:
+
+- **Build command:** `pnpm run build`
+- **Deploy command:** `npx wrangler deploy`
+- **Build variables and secrets:** `ANALYTICS_ORIGIN`, `D1_DATABASE_ID`, and,
+  optionally, `CLOUDFLARE_ACCOUNT_ID`. You can select the Secret type to mask these
+  deployment details in the settings UI.
+
+Vite writes the built Worker configuration and Wrangler's deploy redirect, so
+the deploy command uses the configuration produced by the build. There is no
+inline shell script or full Wrangler JSON build secret. Set application
+credentials under the Worker's runtime **Variables and Secrets**, separately
+from its build settings. Add secrets directly to the existing Worker, or use
+`npm run cf -- secret put NAME`.
+
+Builds do not apply remote migrations automatically. Apply new migrations before
+deploying code that needs them, using the same private database inputs.
+
+### Migrating from the previous private Wrangler copy
+
+Before running an updated command, copy the existing private config's
+`vars.BETTER_AUTH_URL` into `ANALYTICS_ORIGIN`, the `DB` binding's `database_id`
+into `D1_DATABASE_ID`, and optional `account_id` into `CLOUDFLARE_ACCOUNT_ID` in
+`.deployment.env.local`. The two old runtime URLs should share one origin. Move
+any custom binding declarations into the shared template, keeping private IDs
+out of Git. The previous `wrangler.local.jsonc` becomes generated output.
+
+For Cloudflare Builds, add those individual build variables, change the build
+command to `pnpm run build`, and remove the obsolete `WRANGLER_CONFIG_JSON` build
+secret after verifying the new deployment. Existing Worker runtime secrets,
+database contents, and Durable Objects stay in place.
 
 Create a site in the dashboard, then copy its **Install script** snippet into
 the shared page layout of that website. This works on Workers, static sites,
