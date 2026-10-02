@@ -16,18 +16,14 @@ export function SourceIcon({ domain }: { domain: string }) {
   )
 }
 
-/** Circle flags, with Ireland served locally to avoid an incorrect remote SVG. */
+/** Country flags using Iconify's documented SVG endpoint. */
 export function CountryFlag({ country }: { country: string }) {
   if (!country || country === "XX") {
     return <GlobeIcon size={20} className="size-5 shrink-0 text-kumo-subtle" />
   }
   return (
     <img
-      src={
-        country.toUpperCase() === "IE"
-          ? "/flags/ie.svg"
-          : `https://api.iconify.design/circle-flags:${country.toLowerCase()}.svg`
-      }
+      src={`https://api.iconify.design/circle-flags/${country.toLowerCase()}.svg`}
       alt=""
       className="size-5 shrink-0 rounded-full"
       loading="lazy"
