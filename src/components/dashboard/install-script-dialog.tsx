@@ -1,6 +1,10 @@
 import { Button } from "@cloudflare/kumo/components/button"
 import { ClipboardText } from "@cloudflare/kumo/components/clipboard-text"
 import { Dialog } from "@cloudflare/kumo/components/dialog"
+import {
+  MAX_RECORDED_PATH_CHARS,
+  MAX_RECORDED_URL_CHARS,
+} from "@/lib/analytics-config"
 
 interface InstallScriptDialogProps {
   open: boolean
@@ -17,7 +21,7 @@ export function InstallScriptDialog({
   siteName,
   trackerOrigin,
 }: InstallScriptDialogProps) {
-  const snippet = `<script defer src="${trackerOrigin}/script.js" data-site="${siteId}"></script>`
+  const snippet = `<script defer src="${trackerOrigin}/script.js" data-site="${siteId}" data-url-limit="${MAX_RECORDED_URL_CHARS}" data-path-limit="${MAX_RECORDED_PATH_CHARS}"></script>`
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>

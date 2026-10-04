@@ -1,24 +1,180 @@
-import { and, eq, sql } from "drizzle-orm"
+import { sql } from "drizzle-orm"
+import { runBatch } from "./d1-batch"
+import type { SQL } from "drizzle-orm"
 import { db } from "@/db"
-import { dailyDevices, dailyLocations, dailySources, sites } from "@/db/schema"
-import { formatDateInTz, startOfDayUtcMs } from "@/lib/dates"
+import { dailyRollupStatus, dailySummary, sites } from "@/db/schema"
+import { dateRangeList, formatDateInTz, startOfDayUtcMs } from "@/lib/dates"
+import { ROLLUP_VERSION } from "@/lib/reporting-slices"
 
 /**
- * Daily rollup aggregation (§7). Runs once a day from the cron trigger in
+ * Daily rollup aggregation (§7). Runs hourly from the cron trigger in
  * `src/server.ts`. For each site, rolls up the just-completed day (in that
  * site's own timezone) from the raw tables into the `daily_*` tables.
  *
- * Every write is `INSERT ... ON CONFLICT DO UPDATE`, so re-running this
- * for a day that's already been aggregated (manual backfill, retry after
- * a failure) is always safe.
+ * Every day is replaced in one transaction. Re-running it after a failure
+ * is safe, and the cache marker is published with the data.
  */
-export async function runDailyAggregation(
-  dateOverride?: string
-): Promise<void> {
-  const allSites = await db.select().from(sites)
-  for (const site of allSites) {
-    const date = dateOverride ?? previousDateInTz(site.timezone)
-    await aggregateSiteDay(site.id, site.timezone, date)
+// Two reads, two cleanup statements, three 15-statement rollups, and at most
+// one failure-state write stay within the 50-query budget.
+const MAX_ROLLUP_DAYS = 3
+const RETRY_BASE_SECONDS = 2 * 3600
+const RETRY_MAX_SECONDS = 24 * 3600
+
+export async function runDailyAggregation(): Promise<void> {
+  const allSites = await db
+    .select({
+      site: sites,
+      firstTimestamp: sql<number | null>`(SELECT MIN(timestamp) FROM (
+      SELECT MIN(started_at) AS timestamp FROM visits WHERE site_id = "sites"."id"
+      UNION ALL SELECT MIN(timestamp) FROM pages WHERE site_id = "sites"."id"
+      UNION ALL SELECT MIN(timestamp) FROM events WHERE site_id = "sites"."id"
+      UNION ALL SELECT MIN(timestamp) FROM outbound_links WHERE site_id = "sites"."id"
+    ))`,
+    })
+    .from(sites)
+  const metadata = await db
+    .select({
+      siteId: dailySummary.siteId,
+      date: dailySummary.date,
+      startSec: dailyRollupStatus.startSec,
+      endSec: dailyRollupStatus.endSec,
+      version: dailyRollupStatus.version,
+      failures: sql<number>`COALESCE(${dailyRollupStatus.failures}, 0)`,
+      retryAt: sql<number>`COALESCE(${dailyRollupStatus.retryAt}, 0)`,
+    })
+    .from(dailySummary)
+    .leftJoin(
+      dailyRollupStatus,
+      sql`${dailyRollupStatus.siteId} = ${dailySummary.siteId} AND ${dailyRollupStatus.date} = ${dailySummary.date}`
+    )
+    .unionAll(
+      db
+        .select({
+          siteId: dailyRollupStatus.siteId,
+          date: dailyRollupStatus.date,
+          startSec: dailyRollupStatus.startSec,
+          endSec: dailyRollupStatus.endSec,
+          version: dailyRollupStatus.version,
+          failures: dailyRollupStatus.failures,
+          retryAt: dailyRollupStatus.retryAt,
+        })
+        .from(dailyRollupStatus).where(sql`NOT EXISTS (
+        SELECT 1 FROM daily_summary s WHERE s.site_id = ${dailyRollupStatus.siteId}
+          AND s.date = ${dailyRollupStatus.date}
+      )`)
+    )
+  await runBatch([
+    sql`DELETE FROM tracking_contexts WHERE last_seen < ${Math.floor(Date.now() / 1000) - 2 * 86400}`,
+    sql`DELETE FROM source_details_cache WHERE expires_at <= ${Math.floor(Date.now() / 1000)}`,
+  ])
+  const nowSec = Math.floor(Date.now() / 1000)
+  const pending: Array<{
+    siteId: string
+    timezone: string
+    date: string
+    startSec: number
+    endSec: number
+    failures: number
+  }> = []
+  for (const { site, firstTimestamp } of allSites) {
+    try {
+      const previous = previousDateInTz(site.timezone)
+      const known = metadata.filter((day) => day.siteId === site.id)
+      let firstDate =
+        firstTimestamp === null
+          ? previous
+          : formatDateInTz(new Date(firstTimestamp * 1000), site.timezone)
+      for (const day of known) if (day.date < firstDate) firstDate = day.date
+      const byDate = new Map(known.map((day) => [day.date, day]))
+      for (const date of dateRangeList(firstDate, previous)) {
+        const startSec = Math.floor(startOfDayUtcMs(date, site.timezone) / 1000)
+        const endSec = Math.floor(
+          startOfDayUtcMs(nextDateStr(date), site.timezone) / 1000
+        )
+        const cached = byDate.get(date)
+        if (
+          cached?.version === ROLLUP_VERSION &&
+          cached.startSec === startSec &&
+          cached.endSec === endSec
+        )
+          continue
+        const sameDay =
+          cached?.startSec === startSec && cached.endSec === endSec
+        if (sameDay && cached.retryAt > nowSec) continue
+        pending.push({
+          siteId: site.id,
+          timezone: site.timezone,
+          date,
+          startSec,
+          endSec,
+          failures: sameDay ? cached.failures : 0,
+        })
+      }
+    } catch (error) {
+      console.error(
+        "Aggregation planning failed",
+        site.id,
+        error instanceof Error ? error.message : "Unknown error"
+      )
+    }
+  }
+  // Take one day per website per round, rotating the first website each hour.
+  // Recent days still go first within each website, regardless of its timezone.
+  pending.sort((a, b) => b.endSec - a.endSec)
+  const siteIds = [...new Set(pending.map((day) => day.siteId))].sort()
+  const rotation = siteIds.length
+    ? Math.floor(Date.now() / 3600000) % siteIds.length
+    : 0
+  const orderedSites = [
+    ...siteIds.slice(rotation),
+    ...siteIds.slice(0, rotation),
+  ]
+  const queues = new Map(
+    orderedSites.map((id) => [id, pending.filter((day) => day.siteId === id)])
+  )
+  const selected: typeof pending = []
+  while (selected.length < MAX_ROLLUP_DAYS) {
+    let added = false
+    for (const id of orderedSites) {
+      const day = queues.get(id)!.shift()
+      if (!day) continue
+      selected.push(day)
+      added = true
+      if (selected.length === MAX_ROLLUP_DAYS) break
+    }
+    if (!added) break
+  }
+  const failures: Array<SQL> = []
+  for (const day of selected) {
+    try {
+      await aggregateSiteDay(day.siteId, day.timezone, day.date)
+    } catch (error) {
+      const attempts = Math.min(day.failures + 1, 5)
+      const retryAt =
+        nowSec +
+        Math.min(RETRY_MAX_SECONDS, RETRY_BASE_SECONDS * 2 ** (attempts - 1))
+      failures.push(
+        sql`(${day.siteId}, ${day.date}, ${day.startSec}, ${day.endSec}, 0, ${attempts}, ${retryAt})`
+      )
+      console.error(
+        "Aggregation failed",
+        day.siteId,
+        day.date,
+        error instanceof Error ? error.message : "Unknown error"
+      )
+    }
+  }
+  if (failures.length) {
+    // A failed rollup has no summary row yet. Persist all retry states in one query.
+    // Do not overwrite a matching successful marker from another invocation.
+    await db.run(sql`INSERT INTO daily_rollup_status (site_id, date, start_sec, end_sec, version, failures, retry_at)
+      VALUES ${sql.join(failures, sql`, `)}
+      ON CONFLICT (site_id, date) DO UPDATE SET
+        start_sec = excluded.start_sec, end_sec = excluded.end_sec, version = 0,
+        failures = excluded.failures, retry_at = excluded.retry_at
+      WHERE daily_rollup_status.version != ${ROLLUP_VERSION}
+        OR daily_rollup_status.start_sec != excluded.start_sec
+        OR daily_rollup_status.end_sec != excluded.end_sec`)
   }
 }
 
@@ -44,31 +200,32 @@ export async function aggregateSiteDay(
   const startSec = Math.floor(startOfDayUtcMs(date, timezone) / 1000)
   const endSec = Math.floor(startOfDayUtcMs(nextDateStr(date), timezone) / 1000)
 
-  // These rollups gained additional dimensions after launch. Replacing the
-  // day's rows avoids retaining legacy partially-grouped rows alongside the
-  // new, more specific groups when a day is re-aggregated.
-  await db
-    .delete(dailySources)
-    .where(and(eq(dailySources.siteId, siteId), eq(dailySources.date, date)))
-  await db
-    .delete(dailyDevices)
-    .where(and(eq(dailyDevices.siteId, siteId), eq(dailyDevices.date, date)))
-  await db
-    .delete(dailyLocations)
-    .where(
-      and(eq(dailyLocations.siteId, siteId), eq(dailyLocations.date, date))
-    )
+  // Compute every table from the same database snapshot and publish the marker last.
+  const statements = [
+    ...[
+      "daily_summary",
+      "daily_pages",
+      "daily_sources",
+      "daily_devices",
+      "daily_locations",
+      "daily_outbound_links",
+      "daily_events",
+    ].map(
+      (table) =>
+        sql`DELETE FROM ${sql.identifier(table)} WHERE site_id = ${siteId} AND date = ${date}`
+    ),
+  ]
 
-  await db.run(sql`
+  statements.push(sql`
     INSERT INTO daily_summary (site_id, date, visitors, visits, pageviews, bounce_rate, avg_duration_seconds)
     SELECT
       ${siteId},
       ${date},
-      COALESCE((SELECT COUNT(DISTINCT visitor_id) FROM visits WHERE site_id = ${siteId} AND started_at >= ${startSec} AND started_at < ${endSec}), 0),
+      COALESCE((SELECT COUNT(DISTINCT visitor_id) FROM visits WHERE site_id = ${siteId} AND ended_at >= ${startSec} AND started_at < ${endSec}), 0),
       COALESCE((SELECT COUNT(*) FROM visits WHERE site_id = ${siteId} AND started_at >= ${startSec} AND started_at < ${endSec}), 0),
       COALESCE((SELECT COUNT(*) FROM pages WHERE site_id = ${siteId} AND timestamp >= ${startSec} AND timestamp < ${endSec}), 0),
       COALESCE((SELECT AVG(is_bounce) FROM visits WHERE site_id = ${siteId} AND started_at >= ${startSec} AND started_at < ${endSec}), 0),
-      COALESCE((SELECT AVG(ended_at - started_at) FROM visits WHERE site_id = ${siteId} AND started_at >= ${startSec} AND started_at < ${endSec}), 0)
+      COALESCE((SELECT AVG(COALESCE(duration_ms / 1000.0, ended_at - started_at)) FROM visits WHERE site_id = ${siteId} AND started_at >= ${startSec} AND started_at < ${endSec}), 0)
     ON CONFLICT (site_id, date) DO UPDATE SET
       visitors = excluded.visitors,
       visits = excluded.visits,
@@ -77,20 +234,27 @@ export async function aggregateSiteDay(
       avg_duration_seconds = excluded.avg_duration_seconds
   `)
 
-  await db.run(sql`
+  statements.push(sql`
     INSERT INTO daily_pages (site_id, date, path, pageviews, visitors, entrances, exits)
     SELECT
       ${siteId},
       ${date},
-      p.path,
-      COUNT(*),
-      COUNT(DISTINCT v.visitor_id),
-      COUNT(DISTINCT CASE WHEN v.entry_page = p.path THEN v.id END),
-      COUNT(DISTINCT CASE WHEN v.exit_page = p.path THEN v.id END)
-    FROM pages p
-    JOIN visits v ON v.id = p.visit_id
-    WHERE p.site_id = ${siteId} AND p.timestamp >= ${startSec} AND p.timestamp < ${endSec}
-    GROUP BY p.path
+      path,
+      SUM(pageviews), SUM(visitors), SUM(entrances), SUM(exits)
+    FROM (
+      SELECT p.path, COUNT(*) AS pageviews, COUNT(DISTINCT v.visitor_id) AS visitors, 0 AS entrances, 0 AS exits
+      FROM pages p JOIN visits v ON v.id = p.visit_id
+      WHERE p.site_id = ${siteId} AND p.timestamp >= ${startSec} AND p.timestamp < ${endSec}
+      GROUP BY p.path
+      UNION ALL
+      SELECT entry_page AS path, 0, 0, COUNT(*), 0 FROM visits
+      WHERE site_id = ${siteId} AND started_at >= ${startSec} AND started_at < ${endSec} AND entry_page IS NOT NULL
+      GROUP BY entry_page
+      UNION ALL
+      SELECT exit_page AS path, 0, 0, 0, COUNT(*) FROM visits
+      WHERE site_id = ${siteId} AND started_at >= ${startSec} AND started_at < ${endSec} AND exit_page IS NOT NULL
+      GROUP BY exit_page
+    ) GROUP BY path
     ON CONFLICT (site_id, date, path) DO UPDATE SET
       pageviews = excluded.pageviews,
       visitors = excluded.visitors,
@@ -98,7 +262,7 @@ export async function aggregateSiteDay(
       exits = excluded.exits
   `)
 
-  await db.run(sql`
+  statements.push(sql`
     INSERT INTO daily_sources (site_id, date, referrer_domain, utm_source, utm_medium, utm_campaign, visits)
     SELECT
       ${siteId},
@@ -120,7 +284,7 @@ export async function aggregateSiteDay(
       visits = excluded.visits
   `)
 
-  await db.run(sql`
+  statements.push(sql`
     INSERT INTO daily_devices (site_id, date, device_type, browser, os, visits)
     SELECT
       ${siteId},
@@ -137,7 +301,7 @@ export async function aggregateSiteDay(
       visits = excluded.visits
   `)
 
-  await db.run(sql`
+  statements.push(sql`
     INSERT INTO daily_locations (site_id, date, country, region, city, visits)
     SELECT
       ${siteId},
@@ -154,7 +318,7 @@ export async function aggregateSiteDay(
       visits = excluded.visits
   `)
 
-  await db.run(sql`
+  statements.push(sql`
     INSERT INTO daily_outbound_links (site_id, date, url, clicks)
     SELECT
       ${siteId},
@@ -168,7 +332,7 @@ export async function aggregateSiteDay(
       clicks = excluded.clicks
   `)
 
-  await db.run(sql`
+  statements.push(sql`
     INSERT INTO daily_events (site_id, date, name, count)
     SELECT
       ${siteId},
@@ -181,4 +345,9 @@ export async function aggregateSiteDay(
     ON CONFLICT (site_id, date, name) DO UPDATE SET
       count = excluded.count
   `)
+  statements.push(sql`INSERT INTO daily_rollup_status (site_id, date, start_sec, end_sec, version, failures, retry_at)
+    VALUES (${siteId}, ${date}, ${startSec}, ${endSec}, ${ROLLUP_VERSION}, 0, 0)
+    ON CONFLICT (site_id, date) DO UPDATE SET start_sec = excluded.start_sec, end_sec = excluded.end_sec,
+      version = excluded.version, failures = 0, retry_at = 0`)
+  await runBatch(statements)
 }

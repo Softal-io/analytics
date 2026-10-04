@@ -1,66 +1,83 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
+import { z } from "zod"
 import type { RealtimeVisitorsPayload } from "@/lib/realtime"
 
-/**
- * Opens a WebSocket to the site's `LiveVisitors` Durable Object (§11) and
- * returns the live visitor count and approximate locations, pushed by the
- * server — no polling.
- */
-export function useLiveVisitors(siteId: string | undefined): {
-  count: number | null
-  locations: RealtimeVisitorsPayload["locations"]
-} {
+const payloadSchema = z.object({
+  count: z.number().int().nonnegative(),
+  locations: z.array(
+    z.object({
+      latitude: z.number().min(-90).max(90),
+      longitude: z.number().min(-180).max(180),
+      count: z.number().int().nonnegative(),
+    })
+  ),
+})
+const staleAfterMs = 90_000 // The server rebroadcasts once a minute, even when the count is unchanged.
+
+/** Hide old activity as soon as a connection fails or stops delivering updates. */
+export function useLiveVisitors(siteId: string | undefined) {
   const [state, setState] = useState<{
+    siteId?: string
     count: number | null
     locations: RealtimeVisitorsPayload["locations"]
-  }>({ count: null, locations: [] })
-  const wsRef = useRef<WebSocket | null>(null)
-
+    unavailable: boolean
+  }>({ count: null, locations: [], unavailable: false })
   useEffect(() => {
-    setState({ count: null, locations: [] })
     if (!siteId) return
-
+    setState({ siteId, count: null, locations: [], unavailable: false })
     let cancelled = false
+    let ws: WebSocket | undefined
     let retryTimer: ReturnType<typeof setTimeout> | undefined
-
+    let staleTimer: ReturnType<typeof setTimeout> | undefined
+    const unavailable = () => {
+      if (!cancelled)
+        setState({ siteId, count: null, locations: [], unavailable: true })
+    }
+    function armTimeout() {
+      clearTimeout(staleTimer)
+      staleTimer = setTimeout(() => {
+        unavailable()
+        ws?.close()
+      }, staleAfterMs)
+    }
     function connect() {
-      if (cancelled || typeof window === "undefined") return
+      if (cancelled) return
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
-      const url = `${protocol}//${window.location.host}/api/sites/${siteId}/realtime/ws`
-
-      const ws = new WebSocket(url)
-      wsRef.current = ws
-
+      ws = new WebSocket(
+        `${protocol}//${window.location.host}/api/sites/${siteId}/realtime/ws`
+      )
+      armTimeout()
       ws.onmessage = (event) => {
+        if (cancelled) return
         try {
-          const data = JSON.parse(
-            event.data as string
-          ) as Partial<RealtimeVisitorsPayload>
-          if (typeof data.count === "number") {
-            setState({
-              count: data.count,
-              locations: Array.isArray(data.locations) ? data.locations : [],
-            })
-          }
+          const data = payloadSchema.parse(JSON.parse(event.data as string))
+          setState({ siteId, ...data, unavailable: false })
+          armTimeout()
         } catch {
-          // ignore malformed frame
+          /* Invalid frames do not refresh the activity clock. */
         }
       }
       ws.onclose = () => {
-        if (!cancelled) retryTimer = setTimeout(connect, 5000)
+        clearTimeout(staleTimer)
+        if (!cancelled) {
+          unavailable()
+          retryTimer = setTimeout(connect, 5000)
+        }
       }
-      ws.onerror = () => ws.close()
+      ws.onerror = () => {
+        unavailable()
+        ws?.close()
+      }
     }
-
     connect()
-
     return () => {
       cancelled = true
-      if (retryTimer) clearTimeout(retryTimer)
-      wsRef.current?.close()
-      wsRef.current = null
+      clearTimeout(retryTimer)
+      clearTimeout(staleTimer)
+      ws?.close()
     }
   }, [siteId])
-
-  return state
+  return state.siteId === siteId
+    ? state
+    : { count: null, locations: [], unavailable: false }
 }

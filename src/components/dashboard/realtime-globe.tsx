@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef } from "react"
 import type { Globe, Marker } from "cobe"
-import type { CSSProperties } from "react"
 import type { RealtimeVisitorLocation } from "@/lib/realtime"
 
 interface RealtimeGlobeProps {
@@ -200,23 +199,21 @@ export function RealtimeGlobe({
             alt=""
             aria-hidden="true"
             className="pointer-events-none absolute z-10 size-6 rounded-full bg-white object-cover shadow-md ring-2 ring-white transition-[opacity,filter] duration-200"
-            style={
-              {
-                positionAnchor: `--cobe-${marker.id}`,
-                left: "anchor(center)",
-                top: "anchor(center)",
-                translate: "-50% -50%",
-                opacity: visibility,
-                filter: `blur(calc((1 - ${visibility}) * 4px))`,
-              } as CSSProperties & { positionAnchor: string }
-            }
+            style={{
+              positionAnchor: `--cobe-${marker.id}`,
+              left: "anchor(center)",
+              top: "anchor(center)",
+              translate: "-50% -50%",
+              opacity: visibility,
+              filter: `blur(calc((1 - ${visibility}) * 4px))`,
+            }}
           />
         )
       })}
       <div className="pointer-events-none absolute inset-x-0 bottom-2 text-center text-xs text-kumo-subtle">
         {displayedCount > 0
-          ? `${displayedCount} ${displayedCount === 1 ? "visitor" : "visitors"} online`
-          : "No visitors online"}
+          ? `${displayedCount} ${displayedCount === 1 ? "visitor" : "visitors"} active in the last 5 minutes`
+          : "No activity in the last 5 minutes"}
       </div>
     </div>
   )

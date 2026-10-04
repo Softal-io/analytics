@@ -42,7 +42,7 @@ In `.dev.vars`, configure Google OAuth and a random
 npm run access:grant -- admin@example.com admin --local
 ```
 
-Run `npm run dev`, open http://localhost:3000, and sign in with Google.
+Run `npm run dev`, open http://localhost:3006, and sign in with Google.
 Admins can add your first site (name, domain, timezone). Once created, you get a
 `site_id` (a uuid), which is what the tracking snippet needs.
 
@@ -54,7 +54,7 @@ Admins can add your first site (name, domain, timezone). Once created, you get a
 ## Adding the tracking snippet to a site
 
 Every site you track needs the tiny snippet from `public/script.js`
-added to its pages. It's ~2KB, cookieless, and posts to `/collect` on
+added to its pages. It's cookieless and posts to `/collect` on
 every pageview (plus SPA route changes via `pushState`/`replaceState`).
 
 ```html
@@ -65,12 +65,12 @@ every pageview (plus SPA route changes via `pushState`/`replaceState`).
 ></script>
 ```
 
-- Use `http://localhost:3000/script.js` instead while developing locally.
+- Use `http://localhost:3006/script.js` instead while developing locally.
 - `data-site` is the `id` of the site you created (see it in the
   dashboard's site switcher, or `GET /api/sites`).
-- That's the whole integration — no cookie banner needed, since nothing
-  is stored client-side and visitor identity is derived server-side from
-  `IP + User-Agent` (§4 of the spec).
+- The tracker uses no cookies or persistent browser storage. This alone does
+  not establish an exemption from consent requirements. The website owner
+  must assess the analytics setup under the rules that apply to their visitors.
 
 ### Tracking custom events
 
@@ -88,10 +88,10 @@ conversions, etc.):
 
 ## Dashboard
 
-`http://localhost:3000/` (or your deployed URL) — one page, a site
+`http://localhost:3006/` (or your deployed URL) — one page, a site
 switcher + date-range picker (`today` / `7d` / `30d` / `6m` / `1y`) at
 the top, stat cards + chart + filterable ranked lists (top/entry/exit
-pages, referrers/outbound links/UTM, browser/OS/device type,
+pages, outbound links, referrers/campaigns, recent activity, browser/OS/device type,
 country/region/city, and custom events) below. Add more sites any time
 from the same page.
 
@@ -121,7 +121,7 @@ Configure a Google OAuth client of type **Web application** with these
 authorized redirect URIs:
 
 - `https://analytics.example.com/api/auth/callback/google`
-- `http://localhost:3000/api/auth/callback/google`
+- `http://localhost:3006/api/auth/callback/google`
 
 Put `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `BETTER_AUTH_SECRET`, and the
 local `BETTER_AUTH_URL` in `.dev.vars`. Set production credentials as Worker
@@ -190,24 +190,31 @@ the calling server, never in browser code. Unset tokens disable the external API
 | `/api/auth/*`                | Better Auth            | Google sign-in, callback, session, and sign-out.        |
 
 `range` accepts `today | 7d | 30d | 6m | 1y | custom` (custom takes
-`from`/`to` as `YYYY-MM-DD`). Any range that doesn't include "today"
-reads exclusively from the `daily_*` rollup tables — never a scan of raw
-events, no matter how far back the range goes (§8).
+`from`/`to` as `YYYY-MM-DD`). Current, complete past days use cached
+`daily_*` totals and breakdowns. Today and any missing or invalidated days
+use raw records. Unique visitors are
+deduplicated across the full selected range using an indexed query of retained
+visits; adding daily unique counts would count returning visitors repeatedly.
 
 ## Daily aggregation
 
-A Cron Trigger (`10 0 * * *`, see `wrangler.jsonc` → `triggers.crons`)
-rolls the previous UTC day's raw rows into `daily_summary`/`daily_pages`/
+An hourly Cron Trigger (`10 * * * *`, see `wrangler.jsonc` → `triggers.crons`)
+rolls the previous day in each site's timezone into `daily_summary`/`daily_pages`/
 `daily_sources`/`daily_devices`/`daily_locations`/
 `daily_outbound_links`/`daily_events` for every site
-(`src/lib/aggregate.ts`). It's idempotent (`INSERT ... ON
-CONFLICT DO UPDATE`), so re-running it for an already-aggregated day is
-safe.
+(`src/lib/aggregate.ts`). Each day is replaced atomically, so repeating
+a day is safe. Each run builds up to three missing or invalidated days, taking
+one day per website per round and rotating the first website each hour. Recent
+days go first within each website. Failed days save their retry timing in D1:
+the delay starts at two hours, doubles after repeated failures, and caps at
+24 hours. Other websites and older healthy days can continue processing.
+Successful days clear their retry state. Runs use at most 49 queries normally,
+or 50 when failures need to be recorded, within the free Worker query budget.
 
 Test it locally by hitting the scheduled handler:
 
 ```bash
-curl "http://localhost:3000/cdn-cgi/handler/scheduled"
+curl "http://localhost:3006/cdn-cgi/handler/scheduled"
 ```
 
 ## Seeding demo data
@@ -216,8 +223,8 @@ For local dev, `scripts/seed-demo-data.mjs` replaces a site's analytics
 rows with realistic fake traffic (real referrer domains, real
 cities/countries, real browser/OS/device combos, outbound-link clicks, a
 fictional SaaS site's pages, and a handful of custom events). The default
-matches the dashboard's "Last 30 days" range: 29 complete days of daily
-rollups plus raw rows for today.
+generates 30 UTC calendar days of raw activity. Reports group those records
+using the site's configured timezone; cron builds historical caches normally.
 
 ```bash
 node scripts/seed-demo-data.mjs <site-id> [days]   # default 30 calendar days
@@ -260,7 +267,7 @@ src/
     format.ts                 # number/duration/percent formatting
     geo.ts                    # reads request.cf for country/region/city
     lookups.ts                # resolves/inserts sources/devices/locations lookup rows
-    raw-stats.ts              # aggregates raw tables for "today"
+    raw-stats.ts              # aggregates uncached intervals
     session.ts                # 30-min session window / visit upsert logic
     summary.ts, timeseries.ts, top-lists.ts   # dashboard query logic
     ua.ts                     # lightweight User-Agent parser
@@ -390,3 +397,90 @@ Create a site in the dashboard, then copy its **Install script** snippet into
 the shared page layout of that website. This works on Workers, static sites,
 and other hosting providers. No service binding or Cloudflare analytics switch
 is needed in the tracked site's Worker.
+
+## Metric definitions
+
+- Visitors are distinct recognized visitor IDs whose visits overlap the selected range,
+  including visits that continue across midnight. The
+  cookieless IP and user-agent identity is an estimate of people. Daily chart
+  counts can include the same person on multiple days. Keep raw visits for
+  historical visitor deduplication.
+- Visits use a 30-minute inactivity window, refreshed by pageviews, visible-page
+  time reports, and tracked interactions.
+- Average duration includes visible, focused reading time on single-page visits.
+  The snippet reports cumulative page time every 15 seconds and on tab hiding,
+  blur, navigation, and page exit. Hidden tabs do not accrue time. Retries and
+  out-of-order totals do not double-count time. Old visits retain their previous
+  first-to-last-pageview estimates; reading time cannot be backfilled.
+- A visit is engaged after more than 10 seconds of active time, a second
+  pageview, an outbound click, or a custom event. Bounce rate is the percentage
+  of visits that have not engaged. Old visits retain their old definition.
+- Recent activity counts visitors with recorded activity in the last five
+  minutes and is independent of the selected date range.
+- Direct means the browser explicitly reported no external referrer. Unknown
+  means referrer attribution was omitted or invalid. Browsers that suppress
+  referrers can still look like Direct; analytics cannot recover that origin.
+- Sources tooltips show the full UTM source, medium, and campaign values, plus
+  clickable recorded referring URLs and tagged landing URLs. Each group shows
+  its five most visited URLs of each kind, sorted by visits in descending order.
+  Source details open on hover or by clicking the source label. Keyboard users
+  can press Enter or Space to open the details, Tab through the URLs, and Escape
+  to close them and return to the label. URL rankings load when details open and are cached for five minutes in D1
+  and browser memory, so repeated opens reuse the results. The tooltip shows
+  when its URLs were updated. Referring URLs contain only what the
+  browser supplies; many browsers strip paths on cross-site navigation. Older
+  records have no full URLs and fall back to their recorded domain. These URL
+  details are included when the owner shares referrers or campaigns publicly.
+- Outbound clicks include middle-button clicks. For applications that use URL
+  fragments as routes, opt in with `data-hash-routing="true"` on the tracker
+  script. Ordinary fragment anchors remain part of the same page by default.
+- Ranked lists label their units: pageviews, visits, clicks, or events. Event
+  percentages include all event types, even when only the top ten are displayed.
+
+- Recorded HTTP(S) URLs retain their paths, query strings, and fragments up to
+  500 characters. Longer URLs are omitted rather than truncated into misleading
+  links. Referrer domains, visits, and engagement still count; outbound clicks
+  with longer destinations appear under "URL exceeds recording limit".
+  Change `MAX_RECORDED_URL_CHARS` in `src/lib/analytics-config.ts` to configure
+  the server limit. Generated install snippets carry that value in
+  `data-url-limit`; update installed snippets when changing the limit. The
+  tracker defaults to 500 when the attribute is absent. Existing stored records
+  are not deleted, but source URL rankings omit URLs beyond the current limit.
+  Website owners should account for URL recording when including personal
+  information or tokens in URLs and when choosing to share outbound-link lists.
+- Page path dimensions retain their existing 2,048-character limit. Longer
+  paths appear as "Page path exceeds recording limit" without a navigation link;
+  their pageviews, reading time, and actions still count. Navigation between
+  different oversized paths still counts each page. Configure
+  `MAX_RECORDED_PATH_CHARS` and the install snippet's `data-path-limit` together.
+  Campaign URL lookups use complete index searches for each matching UTM tuple,
+  including legacy NULL values. Equivalent campaign identifiers share a cache
+  key regardless of JSON spacing or escape formatting.
+
+Reports carry page context and private, memory-only credentials. Acknowledged
+requests have been persisted; transient failures are retried while the page
+exists. Page and action IDs prevent duplicate counts. Exit delivery remains
+best effort because a browser can destroy the page before a request completes.
+A memory-only document key keeps reports from the same open page associated
+with one recognized visitor even if their network changes or reports arrive
+out of order. The server stores only the key's hash and removes mappings after
+two days without activity. This does not use cookies or browser storage.
+Past-day rollups are a cache: late activity invalidates affected days, queries
+fall back to raw records, and cron rebuilds them atomically. Existing rollups
+without a current marker or metric version are rebuilt gradually after the migration.
+Late reports that connect adjacent visits merge their pages and events atomically,
+preserving the original arrival source. Reports use the persisted page timeline so
+duplicates cannot extend live presence. New snippets freeze each page's start time
+on a document-wide clock, preserving page order and campaign attribution when
+requests are delayed in transit. Old snippets, future page starts, and device
+timestamps differing from server time by more than a minute use server-relative
+timing instead. This adds no database queries or browser storage.
+Chart queries bind day boundaries as JSON
+data rather than growing their SQL text, and hourly charts include 23-hour and
+25-hour local days. Both chart labels and hover timestamps use the site's
+timezone. Invalid new timezones are rejected; existing invalid sites and failed
+aggregation days are logged without stopping aggregation for other sites.
+
+The default local port for both dev and preview is 3006, with strict port checking so OAuth callbacks do
+not silently break when a different application occupies the port. Configure
+Google's local callback as `http://localhost:3006/api/auth/callback/google`.

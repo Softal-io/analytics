@@ -41,7 +41,7 @@ describe("deployment configuration", () => {
     })
     expect(config.d1_databases[0].database_id).toBe(databaseId)
     expect(config.durable_objects.bindings[0].name).toBe("LIVE_VISITORS")
-    expect(config.triggers.crons).toEqual(["10 0 * * *"])
+    expect(config.triggers.crons).toEqual(["10 * * * *"])
   })
 
   it("keeps future shared bindings and variables instead of freezing a private copy", () => {
@@ -57,7 +57,7 @@ describe("deployment configuration", () => {
 
   it("allows local development without a Cloudflare account", () => {
     prepareDeploymentConfig({ root, environment: {} })
-    expect(generated(false).vars.BETTER_AUTH_URL).toBe("http://localhost:3000")
+    expect(generated(false).vars.BETTER_AUTH_URL).toBe("http://localhost:3006")
     expect(generated(false).routes).toEqual([])
   })
 
@@ -75,7 +75,7 @@ describe("deployment configuration", () => {
     expect(generated().d1_databases[0].database_id).toBe(databaseId)
     prepareDeploymentConfig({ root, environment: {} })
     expect(generated(false).d1_databases[0].database_id).toBe(databaseId)
-    expect(generated(false).vars.TRACKER_ORIGIN).toBe("http://localhost:3000")
+    expect(generated(false).vars.TRACKER_ORIGIN).toBe("http://localhost:3006")
     expect(generated().vars.TRACKER_ORIGIN).toBe("https://stats.example.org")
     expect(generated().routes).toHaveLength(1)
   })

@@ -72,14 +72,24 @@ export class LiveVisitors extends DurableObject<Env> {
   /** Called by `/collect` on every pageview for this site. */
   async ping(
     visitorId: string,
-    location?: Omit<RealtimeVisitorLocation, "count">
+    location?: Omit<RealtimeVisitorLocation, "count">,
+    seenAt = Date.now()
   ): Promise<number> {
     const before = this.lastSeen.size
     const expired = this.sweepExpiredVisitors()
     const previous = this.lastSeen.get(visitorId)
+    seenAt = Math.min(Date.now(), seenAt)
+    // Retries of old reports must not make an inactive visitor look active now.
+    if (
+      seenAt < Date.now() - STALE_AFTER_MS ||
+      (previous && seenAt < previous.seenAt)
+    ) {
+      if (expired) await this.broadcast()
+      return this.lastSeen.size
+    }
     const nextLocation = location ?? null
     this.lastSeen.set(visitorId, {
-      seenAt: Date.now(),
+      seenAt,
       location: nextLocation,
     })
     this.ctx.storage.sql.exec(

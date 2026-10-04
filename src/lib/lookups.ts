@@ -19,15 +19,16 @@ export interface CampaignParams {
 
 /** Extracts the external referrer domain and combines it with landing-page UTMs. */
 export function parseReferrer(
-  referrer: string | null,
+  referrer: string | null | undefined,
   siteHostname: string,
   campaign: CampaignParams = {}
 ): ParsedReferrer {
-  let referrerDomain = "(direct)"
+  let referrerDomain = referrer === undefined ? "(unknown)" : "(direct)"
   const siteDomain = normalizeHostname(siteHostname)
 
   if (referrer) {
     const referrerHost = normalizeHostname(referrer)
+    if (!referrerHost) referrerDomain = "(unknown)"
     if (referrerHost && referrerHost !== siteDomain) {
       referrerDomain = referrerHost
     }
@@ -44,6 +45,7 @@ export function parseReferrer(
 function normalizeHostname(value: string): string | null {
   try {
     const url = new URL(value.includes("://") ? value : `https://${value}`)
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null
     return url.hostname.toLowerCase().replace(/^www\./, "") || null
   } catch {
     return null

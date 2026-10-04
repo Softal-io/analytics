@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -29,7 +31,7 @@ vi.mock("@cloudflare/kumo/components/chart", async (importOriginal) => {
   const original = await importOriginal<typeof ChartModule>()
   return {
     ...original,
-    TimeseriesChart: () => <div aria-label="Traffic chart" />,
+    Chart: () => <div aria-label="Traffic chart" />,
   }
 })
 
@@ -59,6 +61,198 @@ afterEach(() => {
 })
 
 describe("public dashboard sharing controls", () => {
+  it("keeps mouse hover previews without moving keyboard focus", async () => {
+    render(
+      <PublicDashboard
+        snapshot={snapshot({
+          sections: {
+            referrers: {
+              rows: [
+                {
+                  label: "presentifyapp.com",
+                  count: 4,
+                  details: {
+                    referrerDomain: "presentifyapp.com",
+                    links: [],
+                    linkCount: 0,
+                  },
+                },
+              ],
+              total: 4,
+            },
+          },
+        })}
+      />
+    )
+    const trigger = screen.getByRole("button", { name: "presentifyapp.com" })
+    fireEvent.mouseEnter(trigger)
+    fireEvent.mouseMove(trigger)
+    await screen.findByRole("dialog", { name: "Source details" })
+    expect(document.activeElement).toBe(document.body)
+  })
+  it("requests URLs only when the source tooltip opens, then updates its navigation link", async () => {
+    const referring = "https://presentifyapp.com/offers?placement=footer"
+    const details = {
+      utmSource: "Presentify",
+      utmMedium: "",
+      utmCampaign: "",
+      links: [],
+      linkCount: 0,
+    }
+    const fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          ...details,
+          links: [{ url: referring, kind: "referrer", visits: 4 }],
+        }),
+    })
+    vi.stubGlobal("fetch", fetch)
+    render(
+      <PublicDashboard
+        snapshot={snapshot({
+          sourceDetailsUrl: "/api/public/lazy-test/source-details?range=7d",
+          sections: {
+            campaigns: {
+              rows: [
+                {
+                  key: JSON.stringify(["Presentify", "", ""]),
+                  label: "Presentify",
+                  count: 4,
+                  details,
+                },
+              ],
+              total: 4,
+            },
+          },
+        })}
+      />
+    )
+    expect(fetch).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Presentify" }))
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("link", { name: "Open Presentify in a new tab" })
+          .getAttribute("href")
+      ).toBe(referring)
+    )
+    expect(screen.getByText(referring)).toBeDefined()
+    fireEvent.click(screen.getByRole("button", { name: "Presentify" }))
+    fireEvent.click(screen.getByRole("button", { name: "Presentify" }))
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+  it("reveals complete source tags and recorded URLs, preferring the referring page", async () => {
+    const referring = "https://presentifyapp.com/blog/deals?from=footer#offers"
+    const landing =
+      "https://fixture.example/offers?utm_source=Presentify&utm_campaign=Summer%20Launch"
+    const details = {
+      utmSource: "Presentify",
+      utmMedium: "referral",
+      utmCampaign: "Summer Launch",
+      links: [
+        { url: landing, kind: "landing" as const, visits: 4 },
+        { url: referring, kind: "referrer" as const, visits: 3 },
+      ],
+      linkCount: 2,
+    }
+    render(
+      <PublicDashboard
+        snapshot={snapshot({
+          sections: {
+            campaigns: {
+              rows: [{ label: "Summer Launch", count: 4, details }],
+              total: 4,
+            },
+          },
+        })}
+      />
+    )
+    expect(screen.getByRole("link").getAttribute("href")).toBe(referring)
+    fireEvent.click(screen.getByRole("button", { name: "Summer Launch" }))
+    const content = await screen.findByText("Tagged landing URLs")
+    const tooltip = within(
+      content.closest(".kumo-popover-popup") as HTMLElement
+    )
+    expect(tooltip.getByText("Presentify")).toBeDefined()
+    expect(tooltip.getByText("referral")).toBeDefined()
+    expect(
+      tooltip.getByRole("link", { name: referring }).getAttribute("href")
+    ).toBe(referring)
+    expect(
+      tooltip.getByRole("link", { name: landing }).getAttribute("href")
+    ).toBe(landing)
+    const link = tooltip.getByRole("link", { name: landing })
+    act(() => link.focus())
+    expect(document.activeElement).toBe(link)
+    expect(screen.getByRole("dialog", { name: "Source details" })).toBeDefined()
+    fireEvent.keyDown(link, { key: "Escape" })
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Source details" })
+      ).toBeNull()
+    )
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Summer Launch" })
+    )
+  })
+  it("hides the previous live globe when updates are unavailable", () => {
+    render(
+      <PublicDashboard
+        activityUnavailable
+        snapshot={snapshot({ realtime: 5, realtimeLocations: [] })}
+      />
+    )
+    expect(screen.queryByLabelText("Live globe")).toBeNull()
+    expect(
+      screen.getByText("Activity updates unavailable. Reconnecting…")
+    ).toBeDefined()
+  })
+  it("opens actual page, outbound, and referrer URLs in new tabs", () => {
+    render(
+      <PublicDashboard
+        snapshot={snapshot({
+          sections: {
+            pages: list("/offers"),
+            outboundLinks: {
+              rows: [
+                {
+                  label: "vendor.example/Offer",
+                  url: "http://vendor.example/Offer",
+                  count: 4,
+                },
+              ],
+              total: 4,
+            },
+            referrers: {
+              rows: [
+                { label: "google.com", count: 2 },
+                { label: "Direct", count: 1 },
+                { label: "Unknown", count: 1 },
+              ],
+              total: 4,
+            },
+            campaigns: list("newsletter / email"),
+          },
+        })}
+      />
+    )
+    const links = screen.getAllByRole("link")
+    expect(links.map((link) => link.getAttribute("href"))).toEqual([
+      "https://fixture.example/offers",
+      "http://vendor.example/Offer",
+      "https://google.com/",
+    ])
+    for (const link of links) {
+      expect(link.getAttribute("target")).toBe("_blank")
+      expect(link.getAttribute("rel")).toBe("noopener noreferrer")
+      expect(link.getAttribute("aria-label")).toContain("in a new tab")
+    }
+    const sources = within(screen.getByRole("region", { name: "Sources" }))
+    fireEvent.click(sources.getByRole("button", { name: "Campaigns" }))
+    expect(sources.queryByRole("link")).toBeNull()
+  })
   it("shows the live globe, updates its data, and removes it when sharing is withdrawn", () => {
     const data = snapshot({
       realtime: 2,
@@ -66,9 +260,19 @@ describe("public dashboard sharing controls", () => {
       sections: { countries: list("Ireland") },
     })
     const { rerender } = render(<PublicDashboard snapshot={data} />)
-    fireEvent.click(
-      screen.getByRole("button", { name: "Realtime visitor globe" })
-    )
+    expect(
+      screen.queryByText("Independent of the selected date range.")
+    ).toBeNull()
+    expect(
+      within(
+        screen.getByRole("region", { name: "Locations" })
+      ).queryByLabelText("Live globe")
+    ).toBeNull()
+    expect(
+      within(
+        screen.getByRole("region", { name: "Recent activity" })
+      ).getByLabelText("Live globe")
+    ).toBeDefined()
     expect(screen.getByLabelText("Live globe").textContent).toBe(
       "2 online, 1 locations"
     )
@@ -102,16 +306,21 @@ describe("public dashboard sharing controls", () => {
       />
     )
     const sources = within(screen.getByRole("region", { name: "Sources" }))
-    expect(screen.getAllByRole("region")).toHaveLength(1)
+    expect(screen.getAllByRole("region")).toHaveLength(2)
     expect(sources.getByText("google.com")).toBeDefined()
     expect(sources.queryByText("vendor.example/product")).toBeNull()
-    fireEvent.click(sources.getByRole("button", { name: "Links" }))
-    expect(sources.getByText("vendor.example/product")).toBeDefined()
-    expect(sources.queryByText("google.com")).toBeNull()
-    fireEvent.click(sources.getByRole("button", { name: "UTM" }))
+    expect(
+      within(screen.getByRole("region", { name: "Outbound links" })).getByText(
+        "vendor.example/product"
+      )
+    ).toBeDefined()
+    expect(sources.queryByRole("button", { name: "Links" })).toBeNull()
+    fireEvent.click(sources.getByRole("button", { name: "Campaigns" }))
     expect(sources.getByText("newsletter / email")).toBeDefined()
     expect(
-      sources.getByRole("button", { name: "UTM" }).getAttribute("aria-pressed")
+      sources
+        .getByRole("button", { name: "Campaigns" })
+        .getAttribute("aria-pressed")
     ).toBe("true")
   })
 
@@ -123,7 +332,7 @@ describe("public dashboard sharing controls", () => {
     const { rerender } = render(<PublicDashboard snapshot={data} />)
     expect(screen.getByText("Visitors")).toBeDefined()
     expect(screen.getByText("Pageviews")).toBeDefined()
-    expect(screen.queryByText("Visits")).toBeNull()
+    expect(screen.queryByText("Visits", { selector: "span" })).toBeNull()
     expect(screen.queryByText("Bounce rate")).toBeNull()
     expect(screen.queryByText("Avg. duration")).toBeNull()
     expect(screen.queryByLabelText("Traffic chart")).toBeNull()
@@ -141,7 +350,7 @@ describe("public dashboard sharing controls", () => {
       />
     )
     expect(screen.queryByRole("region", { name: "Overview" })).toBeNull()
-    expect(screen.queryByRole("button", { name: "UTM" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Campaigns" })).toBeNull()
     expect(screen.queryByText("spring-launch")).toBeNull()
     expect(screen.getByText("shared.example")).toBeDefined()
   })

@@ -1,118 +1,139 @@
-import { and, asc, eq, gte, lt, lte, sql } from "drizzle-orm"
+import { and, eq, sql } from "drizzle-orm"
+import { cachedDateFilter, getReportingSlices } from "./reporting-slices"
+import type { ReportingSlices } from "./reporting-slices"
+import type { Site } from "@/db/schema"
+import type { ResolvedRange } from "@/lib/dates"
 import { db } from "@/db"
-import { dailySummary, pages, type Site, visits } from "@/db/schema"
-import { splitRangeForQuery, startOfDayUtcMs, type ResolvedRange } from "@/lib/dates"
-import { computeRawStats } from "@/lib/raw-stats"
+import { dailySummary } from "@/db/schema"
+import { startOfDayUtcMs } from "@/lib/dates"
 
 export interface TimeseriesPoint {
-  /** UTC epoch ms — always a concrete instant, never just a date string. */
+  /** UTC epoch ms, including distinct instants for repeated local hours. */
   timestamp: number
   pageviews: number
   visitors: number
 }
+interface Bucket {
+  startSec: number
+  endSec: number
+}
 
-/**
- * One point per day for multi-day ranges (rollup days + a final "today"
- * raw point). For the single-day "today" range there's only one rollup
- * row possible (rollups are daily-granularity by design, §7) — a line
- * chart with one point is just a dot, so that case buckets the raw
- * tables by hour instead.
+/** Bind boundaries as data, keeping SQL size and parameter count constant.
+ * Range joins use the page-time and visit-activity indexes. A visit spanning
+ * midnight contributes a visitor to each day, but remains one visit.
  */
+async function rawBuckets(siteId: string, buckets: Array<Bucket>) {
+  if (!buckets.length)
+    return {
+      pages: new Map<number, number>(),
+      visitors: new Map<number, number>(),
+    }
+  const boundaries = JSON.stringify(
+    buckets.map(({ startSec, endSec }, index) => [
+      startSec,
+      endSec,
+      index === 0 || buckets[index - 1].endSec !== startSec ? 1 : 0,
+    ])
+  )
+  const bucketTable = sql`WITH RECURSIVE buckets AS MATERIALIZED (
+    SELECT CAST(key AS INTEGER) AS ordinal, CAST(json_extract(value, '$[2]') AS INTEGER) AS first_in_window, CAST(json_extract(value, '$[0]') AS INTEGER) AS start_sec,
+      CAST(json_extract(value, '$[1]') AS INTEGER) AS end_sec
+    FROM json_each(${boundaries})
+  )`
+  const [pageRows, visitorRows] = await Promise.all([
+    db.all<{ bucket: number; count: number }>(sql`${bucketTable}
+      SELECT b.start_sec AS bucket, COUNT(*) AS count FROM buckets b
+      JOIN pages p ON p.site_id = ${siteId} AND p.timestamp >= b.start_sec AND p.timestamp < b.end_sec
+      GROUP BY b.start_sec`),
+    db.all<{ bucket: number; count: number }>(sql`${bucketTable},
+      activity(visitor_id, ended_at, ordinal) AS (
+        SELECT v.visitor_id, v.ended_at, b.ordinal FROM buckets b
+        CROSS JOIN visits v INDEXED BY idx_visits_site_started_visitor
+          WHERE v.site_id = ${siteId} AND v.started_at >= b.start_sec AND v.started_at < b.end_sec
+        UNION
+        SELECT v.visitor_id, v.ended_at, b.ordinal FROM buckets b
+        CROSS JOIN visits v INDEXED BY idx_visits_site_ended_started_visitor
+          WHERE b.first_in_window = 1 AND v.site_id = ${siteId} AND v.ended_at >= b.start_sec AND v.started_at < b.start_sec
+        UNION
+        SELECT a.visitor_id, a.ended_at, next.ordinal FROM activity a
+        JOIN buckets current ON current.ordinal = a.ordinal
+        JOIN buckets next ON next.ordinal = a.ordinal + 1 AND next.start_sec = current.end_sec
+          AND a.ended_at >= next.start_sec
+      )
+      SELECT b.start_sec AS bucket, COUNT(DISTINCT a.visitor_id) AS count
+      FROM activity a JOIN buckets b ON b.ordinal = a.ordinal GROUP BY b.start_sec`),
+  ])
+  return {
+    pages: new Map(
+      pageRows.map((row) => [Number(row.bucket), Number(row.count)])
+    ),
+    visitors: new Map(
+      visitorRows.map((row) => [Number(row.bucket), Number(row.count)])
+    ),
+  }
+}
+
 export async function computeTimeseries(
   site: Site,
   resolved: ResolvedRange,
-): Promise<TimeseriesPoint[]> {
-  const isSingleToday =
-    resolved.fromDate === resolved.today && resolved.toDate === resolved.today
-
-  if (isSingleToday) {
+  reporting?: ReportingSlices
+): Promise<Array<TimeseriesPoint>> {
+  if (
+    resolved.fromDate === resolved.today &&
+    resolved.toDate === resolved.today
+  )
     return computeHourlyPoints(site, resolved.today)
-  }
 
-  const { rollupDates, rollupBounds, includesToday } = splitRangeForQuery(resolved)
-  const todayStart = startOfDayUtcMs(resolved.today, site.timezone)
-
-  // Same deal as computeSummary — these two don't depend on each other.
-  const [rollupRows, today] = await Promise.all([
-    rollupBounds
+  const slices = reporting ?? (await getReportingSlices(site, resolved))
+  const [cached, raw] = await Promise.all([
+    slices.cached.length
       ? db
           .select()
           .from(dailySummary)
           .where(
             and(
               eq(dailySummary.siteId, site.id),
-              gte(dailySummary.date, rollupBounds.from),
-              lte(dailySummary.date, rollupBounds.to),
-            ),
+              cachedDateFilter(dailySummary.date, slices)
+            )
           )
-          .orderBy(asc(dailySummary.date))
       : Promise.resolve([]),
-    includesToday
-      ? computeRawStats(site.id, Math.floor(todayStart / 1000), Math.floor(Date.now() / 1000))
-      : Promise.resolve(null),
+    rawBuckets(
+      site.id,
+      slices.days.filter((day) => !day.cached)
+    ),
   ])
-
-  const points: TimeseriesPoint[] = []
-  const byDate = new Map(rollupRows.map((r) => [r.date, r]))
-  for (const date of rollupDates) {
-    const r = byDate.get(date)
-    points.push({
-      timestamp: startOfDayUtcMs(date, site.timezone),
-      pageviews: r?.pageviews ?? 0,
-      visitors: r?.visitors ?? 0,
-    })
-  }
-
-  if (today) {
-    points.push({
-      timestamp: todayStart,
-      pageviews: today.pageviews,
-      visitors: today.visitors,
-    })
-  }
-
-  return points
+  const byDate = new Map(cached.map((row) => [row.date, row]))
+  return slices.days.map((day) => ({
+    timestamp: day.startSec * 1000,
+    pageviews: day.cached
+      ? (byDate.get(day.date)?.pageviews ?? 0)
+      : (raw.pages.get(day.startSec) ?? 0),
+    visitors: day.cached
+      ? (byDate.get(day.date)?.visitors ?? 0)
+      : (raw.visitors.get(day.startSec) ?? 0),
+  }))
 }
 
-/** Hourly buckets from raw `pages`/`visits` for "today" only (§8). */
 async function computeHourlyPoints(
   site: Site,
-  todayStr: string,
-): Promise<TimeseriesPoint[]> {
-  const dayStartSec = Math.floor(startOfDayUtcMs(todayStr, site.timezone) / 1000)
-  const nowSec = Math.floor(Date.now() / 1000)
-  const currentHour = Math.min(23, Math.floor((nowSec - dayStartSec) / 3600))
-
-  const pageBucket = sql<number>`CAST((${pages.timestamp} - ${dayStartSec}) / 3600 AS INTEGER)`
-  const visitBucket = sql<number>`CAST((${visits.startedAt} - ${dayStartSec}) / 3600 AS INTEGER)`
-
-  const [pageRows, visitRows] = await Promise.all([
-    db
-      .select({ bucket: pageBucket, pageviews: sql<number>`COUNT(*)` })
-      .from(pages)
-      .where(
-        and(eq(pages.siteId, site.id), gte(pages.timestamp, dayStartSec), lt(pages.timestamp, nowSec + 1)),
-      )
-      .groupBy(pageBucket),
-    db
-      .select({ bucket: visitBucket, visitors: sql<number>`COUNT(DISTINCT ${visits.visitorId})` })
-      .from(visits)
-      .where(
-        and(eq(visits.siteId, site.id), gte(visits.startedAt, dayStartSec), lt(visits.startedAt, nowSec + 1)),
-      )
-      .groupBy(visitBucket),
-  ])
-
-  const pageviewsByHour = new Map(pageRows.map((r) => [Number(r.bucket), Number(r.pageviews)]))
-  const visitorsByHour = new Map(visitRows.map((r) => [Number(r.bucket), Number(r.visitors)]))
-
-  const points: TimeseriesPoint[] = []
-  for (let hour = 0; hour <= currentHour; hour++) {
-    points.push({
-      timestamp: (dayStartSec + hour * 3600) * 1000,
-      pageviews: pageviewsByHour.get(hour) ?? 0,
-      visitors: visitorsByHour.get(hour) ?? 0,
-    })
-  }
-  return points
+  today: string
+): Promise<Array<TimeseriesPoint>> {
+  const next = new Date(`${today}T00:00:00Z`)
+  next.setUTCDate(next.getUTCDate() + 1)
+  const start = Math.floor(startOfDayUtcMs(today, site.timezone) / 1000)
+  const end = Math.min(
+    Math.floor(Date.now() / 1000) + 1,
+    Math.floor(
+      startOfDayUtcMs(next.toISOString().slice(0, 10), site.timezone) / 1000
+    )
+  )
+  const buckets: Array<Bucket> = []
+  for (let instant = start; instant < end; instant += 3600)
+    buckets.push({ startSec: instant, endSec: Math.min(instant + 3600, end) })
+  const raw = await rawBuckets(site.id, buckets)
+  return buckets.map((bucket) => ({
+    timestamp: bucket.startSec * 1000,
+    pageviews: raw.pages.get(bucket.startSec) ?? 0,
+    visitors: raw.visitors.get(bucket.startSec) ?? 0,
+  }))
 }

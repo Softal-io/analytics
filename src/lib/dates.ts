@@ -1,14 +1,20 @@
 /**
  * Date-range helpers, timezone-aware (per-site `timezone`, §5).
  *
- * D1/SQLite has no timezone-aware date functions, so all bucketing here
- * is done in JS with `Intl.DateTimeFormat`. Offsets are computed once per
- * call rather than looked up from a timezone database — good enough for
- * a personal-analytics tool; DST-transition edges may be off by a few
- * minutes, which doesn't matter at daily-rollup granularity.
+ * D1/SQLite has no timezone-aware date functions. Local day boundaries are
+ * resolved with Intl, including offset changes around midnight.
  */
 
 export type RangeKey = "today" | "7d" | "30d" | "6m" | "1y" | "custom"
+
+export function isValidTimezone(timezone: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: timezone }).format(0)
+    return true
+  } catch {
+    return false
+  }
+}
 
 export function isRangeKey(value: string | null): value is RangeKey {
   return (
@@ -21,10 +27,28 @@ export function isRangeKey(value: string | null): value is RangeKey {
   )
 }
 
+const dateFormatters = new Map<string, Intl.DateTimeFormat>()
+const offsetFormatters = new Map<string, Intl.DateTimeFormat>()
+function formatter(
+  cache: Map<string, Intl.DateTimeFormat>,
+  timezone: string,
+  options: Intl.DateTimeFormatOptions
+) {
+  let result = cache.get(timezone)
+  if (!result) {
+    result = new Intl.DateTimeFormat("en-CA", {
+      ...options,
+      timeZone: timezone,
+    })
+    if (cache.size >= 64) cache.clear()
+    cache.set(timezone, result)
+  }
+  return result
+}
+
 /** Formats a Date as `YYYY-MM-DD` in the given IANA timezone. */
 export function formatDateInTz(date: Date, timezone: string): string {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
+  const parts = formatter(dateFormatters, timezone, {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -40,8 +64,7 @@ export function todayInTz(timezone: string): string {
 
 /** Minutes to add to a UTC timestamp to get local wall-clock time. */
 function getTimezoneOffsetMinutes(timezone: string, date: Date): number {
-  const dtf = new Intl.DateTimeFormat("en-US", {
-    timeZone: timezone,
+  const dtf = formatter(offsetFormatters, timezone, {
     hourCycle: "h23",
     year: "numeric",
     month: "2-digit",
@@ -59,7 +82,7 @@ function getTimezoneOffsetMinutes(timezone: string, date: Date): number {
     Number(map.day),
     Number(map.hour),
     Number(map.minute),
-    Number(map.second),
+    Number(map.second)
   )
   return (asUtc - date.getTime()) / 60_000
 }
@@ -67,13 +90,36 @@ function getTimezoneOffsetMinutes(timezone: string, date: Date): number {
 /** UTC epoch ms for local midnight of `dateStr` (YYYY-MM-DD) in `timezone`. */
 export function startOfDayUtcMs(dateStr: string, timezone: string): number {
   const guessUtcMs = Date.parse(`${dateStr}T00:00:00Z`)
-  const offsetMin = getTimezoneOffsetMinutes(timezone, new Date(guessUtcMs))
-  return guessUtcMs - offsetMin * 60_000
+  let instant = guessUtcMs
+  let latest = instant
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const next =
+      guessUtcMs -
+      getTimezoneOffsetMinutes(timezone, new Date(instant)) * 60_000
+    latest = Math.max(latest, next)
+    if (next === instant) break
+    instant = next
+    // A skipped midnight oscillates between the adjacent offsets. Its day
+    // starts at the later candidate, when the new local date first exists.
+    if (attempt === 3) instant = latest
+  }
+  if (formatDateInTz(new Date(instant - 1), timezone) >= dateStr) {
+    // Midnight can occur twice when an offset moves backward. Find its first occurrence.
+    let low = instant - 36 * 3600_000
+    let high = instant
+    while (high - low > 1) {
+      const middle = Math.floor((low + high) / 2)
+      if (formatDateInTz(new Date(middle), timezone) < dateStr) low = middle
+      else high = middle
+    }
+    return high
+  }
+  return instant
 }
 
 /** Inclusive list of `YYYY-MM-DD` date strings from `fromDate` to `toDate`. */
-export function dateRangeList(fromDate: string, toDate: string): string[] {
-  const out: string[] = []
+export function dateRangeList(fromDate: string, toDate: string): Array<string> {
+  const out: Array<string> = []
   const d = new Date(`${fromDate}T00:00:00Z`)
   const end = new Date(`${toDate}T00:00:00Z`)
   while (d.getTime() <= end.getTime()) {
@@ -103,7 +149,7 @@ export function resolveRange(
   range: RangeKey,
   timezone: string,
   customFrom?: string | null,
-  customTo?: string | null,
+  customTo?: string | null
 ): ResolvedRange {
   const today = todayInTz(timezone)
 
@@ -118,30 +164,8 @@ export function resolveRange(
     return { fromDate: today, toDate: today, today }
   }
 
-  const days = RANGE_DAYS[range] ?? RANGE_DAYS["30d"]
+  const days = RANGE_DAYS[range]
   const d = new Date(`${today}T00:00:00Z`)
   d.setUTCDate(d.getUTCDate() - days)
   return { fromDate: d.toISOString().slice(0, 10), toDate: today, today }
-}
-
-/**
- * Splits a resolved range into "complete past days" (safe to read from
- * `daily_*` rollups) and whether "today" is included (must be read from
- * raw tables). This is the query rule from §8.
- *
- * `rollupDates` is for client-side iteration (e.g. zero-filling missing
- * days in a chart) — never pass it to `inArray()` in a query. D1 caps
- * bound parameters at 100 per statement, and a `6m`/`1y` range easily
- * has 180-365 dates. Use `rollupBounds` (2 params, `date BETWEEN`)
- * instead — safe because `rollupDates` is always a contiguous run.
- */
-export function splitRangeForQuery(range: ResolvedRange) {
-  const allDates = dateRangeList(range.fromDate, range.toDate)
-  const rollupDates = allDates.filter((d) => d < range.today)
-  const includesToday = allDates.includes(range.today)
-  const rollupBounds =
-    rollupDates.length > 0
-      ? { from: rollupDates[0]!, to: rollupDates[rollupDates.length - 1]! }
-      : null
-  return { includesToday, rollupDates, rollupBounds }
 }

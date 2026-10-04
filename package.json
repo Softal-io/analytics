@@ -4,9 +4,9 @@
   "type": "module",
   "scripts": {
     "predev": "npm run db:migrate",
-    "dev": "vite dev --port 3000",
+    "dev": "vite dev --port 3006 --strictPort",
     "build": "vite build",
-    "preview": "npm run build && vite preview",
+    "preview": "npm run build && vite preview --port 3006 --strictPort",
     "test": "vitest run",
     "deploy": "npm run build && node scripts/wrangler.mjs deploy --config dist/server/wrangler.json",
     "cf-typegen": "node scripts/wrangler.mjs types --config wrangler.jsonc",

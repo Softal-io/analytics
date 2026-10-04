@@ -33,9 +33,9 @@ export const metricLabels: Record<PublicMetric, string> = {
 export const sectionLabels: Record<PublicSection, string> = {
   chart: "Traffic chart",
   pages: "Top pages",
-  referrers: "Referrers",
+  referrers: "Referrers and recorded URLs",
   outboundLinks: "Outbound links",
-  campaigns: "UTM campaigns",
+  campaigns: "UTM campaigns and recorded URLs",
   browsers: "Browsers",
   operatingSystems: "Operating systems",
   deviceTypes: "Device types",
@@ -43,8 +43,8 @@ export const sectionLabels: Record<PublicSection, string> = {
   regions: "Regions",
   cities: "Cities",
   events: "Custom events",
-  realtime: "Live visitor count",
-  realtimeGlobe: "Live location globe",
+  realtime: "Visitors active in the last 5 minutes",
+  realtimeGlobe: "Recent activity globe",
 }
 export function canShareRealtimeGlobe(sections: ReadonlyArray<PublicSection>) {
   return sections.includes("realtime") && sections.includes("cities")

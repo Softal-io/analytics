@@ -25,7 +25,7 @@ export default {
     return response
   },
 
-  // Daily rollup cron (§7) — see wrangler.jsonc `triggers.crons`.
+  // Bounded hourly rollup cron — see wrangler.jsonc `triggers.crons`.
   async scheduled(
     _event: ScheduledController,
     _env: Env,

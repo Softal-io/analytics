@@ -1,4 +1,3 @@
-import { Badge } from "@cloudflare/kumo/components/badge"
 import { Button } from "@cloudflare/kumo/components/button"
 import { DropdownMenu } from "@cloudflare/kumo/components/dropdown"
 import { CaretDownIcon } from "@phosphor-icons/react"
@@ -73,15 +72,6 @@ function PublicView() {
           >
             {snapshot.site.name}
           </h1>
-          {!live.unavailable && live.count !== undefined && live.count > 0 && (
-            <Badge
-              appearance="dot"
-              variant="success"
-              className="shrink-0 whitespace-nowrap"
-            >
-              {live.count} online
-            </Badge>
-          )}
         </div>
         <DropdownMenu>
           <DropdownMenu.Trigger
@@ -124,11 +114,11 @@ function PublicView() {
       </header>
       {live.unavailable && (
         <p role="status" className="text-xs text-kumo-subtle">
-          Live updates temporarily unavailable. Showing last known data.
-          Retrying…
+          Live updates temporarily unavailable. Retrying…
         </p>
       )}
       <PublicDashboard
+        activityUnavailable={live.unavailable}
         snapshot={{
           ...snapshot,
           realtime: live.count,

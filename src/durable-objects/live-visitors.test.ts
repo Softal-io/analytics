@@ -63,6 +63,23 @@ describe("live visitor persistence", () => {
     expect(await visitors.snapshot()).toEqual({ count: 0, locations: [] })
     database.close()
   })
+  it("does not revive stale visitors or move their presence backward when reports retry", async () => {
+    vi.useFakeTimers()
+    const { state, database } = createState()
+    const visitors = new LiveVisitors(state, {} as Env)
+    const originalTime = Date.now()
+    await visitors.ping("one", { latitude: 1, longitude: 2 }, originalTime)
+    vi.advanceTimersByTime(60000)
+    await visitors.ping("one", { latitude: 3, longitude: 4 }, Date.now())
+    await visitors.ping("one", { latitude: 1, longitude: 2 }, originalTime)
+    expect((await visitors.snapshot()).locations).toEqual([
+      { latitude: 3, longitude: 4, count: 1 },
+    ])
+    vi.advanceTimersByTime(5 * 60 * 1000 + 1)
+    expect(await visitors.ping("one", undefined, originalTime)).toBe(0)
+    expect(await visitors.snapshot()).toEqual({ count: 0, locations: [] })
+    database.close()
+  })
   beforeEach(() => {
     access.valid = new Set(["session"])
     access.fail = false

@@ -9,6 +9,9 @@ import {
 } from "drizzle-orm/sqlite-core"
 import { createInsertSchema, createSelectSchema } from "drizzle-zod"
 import { z } from "zod"
+import type { SourceDetails } from "@/lib/source-details"
+import { isValidTimezone } from "@/lib/dates"
+import { MAX_RECORDED_URL_CHARS } from "@/lib/analytics-config"
 import {
   canShareRealtimeGlobe,
   publicMetrics,
@@ -25,7 +28,7 @@ import {
  *    devices, locations, events) — written by `/collect`.
  *  - Rollup tables (daily_*) — written once a day by the cron trigger
  *    (see src/lib/aggregate.ts). The dashboard reads exclusively from
- *    these for any range that doesn't include "today".
+ *    these when the corresponding cache marker is current.
  */
 
 // ---------------------------------------------------------------------------
@@ -196,6 +199,52 @@ export const visitors = sqliteTable(
   (t) => [index("idx_visitors_site_seen").on(t.siteId, t.lastSeen)]
 )
 
+/** A browser-document credential links reports despite changed networks or arrival order. */
+export const trackingContexts = sqliteTable(
+  "tracking_contexts",
+  {
+    siteId: text("site_id")
+      .notNull()
+      .references(() => sites.id),
+    keyHash: text("key_hash").notNull(),
+    visitorId: text("visitor_id")
+      .notNull()
+      .references(() => visitors.id),
+    lastSeen: int("last_seen").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.siteId, t.keyHash] }),
+    index("idx_tracking_contexts_seen").on(t.lastSeen),
+  ]
+)
+export type TrackingContext = typeof trackingContexts.$inferSelect
+export type NewTrackingContext = typeof trackingContexts.$inferInsert
+export const selectTrackingContextSchema = createSelectSchema(trackingContexts)
+export const insertTrackingContextSchema = createInsertSchema(trackingContexts)
+
+/** Shared, bounded-lifetime cache for expensive URL rankings requested by tooltips. */
+export const sourceDetailsCache = sqliteTable(
+  "source_details_cache",
+  {
+    siteId: text("site_id")
+      .notNull()
+      .references(() => sites.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    details: text("details", { mode: "json" }).$type<SourceDetails>().notNull(),
+    expiresAt: int("expires_at").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.siteId, t.key] }),
+    index("idx_source_details_cache_expiry").on(t.expiresAt),
+  ]
+)
+export type SourceDetailsCache = typeof sourceDetailsCache.$inferSelect
+export type NewSourceDetailsCache = typeof sourceDetailsCache.$inferInsert
+export const selectSourceDetailsCacheSchema =
+  createSelectSchema(sourceDetailsCache)
+export const insertSourceDetailsCacheSchema =
+  createInsertSchema(sourceDetailsCache)
+
 export const sources = sqliteTable(
   "sources",
   {
@@ -212,6 +261,12 @@ export const sources = sqliteTable(
     uniqueIndex("idx_sources_unique").on(
       t.siteId,
       t.referrerDomain,
+      t.utmSource,
+      t.utmMedium,
+      t.utmCampaign
+    ),
+    index("idx_sources_site_campaign").on(
+      t.siteId,
       t.utmSource,
       t.utmMedium,
       t.utmCampaign
@@ -253,17 +308,37 @@ export const visits = sqliteTable(
       .references(() => visitors.id),
     startedAt: int("started_at").notNull(),
     endedAt: int("ended_at").notNull(),
+    // Null preserves the legacy first-to-last-pageview estimate.
+    durationMs: int("duration_ms"),
     entryPage: text("entry_page"),
     exitPage: text("exit_page"),
     pageCount: int("page_count").notNull().default(1),
     isBounce: int("is_bounce", { mode: "boolean" }).notNull().default(true),
     sourceId: int("source_id").references(() => sources.id),
+    referrerUrl: text("referrer_url"),
+    landingUrl: text("landing_url"),
     deviceId: int("device_id").references(() => devices.id),
     locationId: int("location_id").references(() => locations.id),
   },
   (t) => [
     index("idx_visits_site_started").on(t.siteId, t.startedAt),
+    index("idx_visits_site_started_visitor").on(
+      t.siteId,
+      t.startedAt,
+      t.visitorId
+    ),
+    index("idx_visits_site_ended_started_visitor").on(
+      t.siteId,
+      t.endedAt,
+      t.startedAt,
+      t.visitorId
+    ),
     index("idx_visits_visitor").on(t.visitorId, t.startedAt),
+    index("idx_visits_site_source_started").on(
+      t.siteId,
+      t.sourceId,
+      t.startedAt
+    ),
   ]
 )
 
@@ -280,10 +355,15 @@ export const pages = sqliteTable(
     path: text("path").notNull(),
     title: text("title"),
     timestamp: int("timestamp").notNull(),
+    trackingId: text("tracking_id"),
+    reportKeyHash: text("report_key_hash"),
+    timestampMs: int("timestamp_ms"),
+    durationMs: int("duration_ms").notNull().default(0),
   },
   (t) => [
     index("idx_pages_site_ts").on(t.siteId, t.timestamp),
     index("idx_pages_visit").on(t.visitId),
+    uniqueIndex("idx_pages_tracking").on(t.siteId, t.trackingId),
   ]
 )
 
@@ -298,9 +378,13 @@ export const outboundLinks = sqliteTable(
       .notNull()
       .references(() => visitors.id),
     url: text("url").notNull(),
+    trackingId: text("tracking_id"),
     timestamp: int("timestamp").notNull(),
   },
-  (t) => [index("idx_outbound_links_site_ts").on(t.siteId, t.timestamp)]
+  (t) => [
+    index("idx_outbound_links_site_ts").on(t.siteId, t.timestamp),
+    uniqueIndex("idx_outbound_links_tracking").on(t.siteId, t.trackingId),
+  ]
 )
 
 export const events = sqliteTable(
@@ -314,15 +398,41 @@ export const events = sqliteTable(
       .notNull()
       .references(() => visits.id),
     name: text("name").notNull(),
+    trackingId: text("tracking_id"),
     props: text("props"), // JSON blob, small (<2KB)
     timestamp: int("timestamp").notNull(),
   },
-  (t) => [index("idx_events_site_name_ts").on(t.siteId, t.name, t.timestamp)]
+  (t) => [
+    index("idx_events_site_name_ts").on(t.siteId, t.name, t.timestamp),
+    index("idx_events_site_ts").on(t.siteId, t.timestamp),
+    uniqueIndex("idx_events_tracking").on(t.siteId, t.trackingId),
+  ]
 )
 
 // ---------------------------------------------------------------------------
 // Rollup tables — written by cron, read by the dashboard (§7, §8)
 // ---------------------------------------------------------------------------
+
+/** Current rollups use their metric version; failed days use version 0 and retry timing. */
+export const dailyRollupStatus = sqliteTable(
+  "daily_rollup_status",
+  {
+    siteId: text("site_id").notNull(),
+    date: text("date").notNull(),
+    startSec: int("start_sec").notNull(),
+    endSec: int("end_sec").notNull(),
+    version: int("version").notNull().default(1),
+    failures: int("failures").notNull().default(0),
+    retryAt: int("retry_at").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.siteId, t.date] })]
+)
+export type DailyRollupStatus = typeof dailyRollupStatus.$inferSelect
+export type NewDailyRollupStatus = typeof dailyRollupStatus.$inferInsert
+export const selectDailyRollupStatusSchema =
+  createSelectSchema(dailyRollupStatus)
+export const insertDailyRollupStatusSchema =
+  createInsertSchema(dailyRollupStatus)
 
 export const dailySummary = sqliteTable(
   "daily_summary",
@@ -444,7 +554,14 @@ export const selectSiteSchema = createSelectSchema(sites)
 export const insertSiteSchema = createInsertSchema(sites, {
   name: (schema) => schema.min(1).max(100),
   domain: (schema) => schema.min(1).max(253),
-  timezone: (schema) => schema.min(1).max(64),
+  timezone: (schema) =>
+    schema
+      .min(1)
+      .max(64)
+      .refine(
+        isValidTimezone,
+        "Enter a valid IANA timezone, such as Europe/Dublin"
+      ),
 })
   .pick({ name: true, domain: true, timezone: true })
   .partial({ timezone: true })
@@ -460,7 +577,7 @@ export type EventRow = typeof events.$inferSelect
 
 export const selectOutboundLinkSchema = createSelectSchema(outboundLinks)
 export const insertOutboundLinkSchema = createInsertSchema(outboundLinks, {
-  url: (schema) => schema.url().max(2048),
+  url: (schema) => schema.url().max(MAX_RECORDED_URL_CHARS),
 }).pick({
   siteId: true,
   visitorId: true,

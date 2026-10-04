@@ -54,7 +54,7 @@ export function prepareDeploymentConfig({
 
   let origin
   try {
-    origin = new URL(originInput || "http://localhost:3000")
+    origin = new URL(originInput || "http://localhost:3006")
   } catch {
     throw new Error(
       "ANALYTICS_ORIGIN must be a URL origin, such as https://analytics.example.com"
@@ -93,8 +93,8 @@ export function prepareDeploymentConfig({
   databases[0].database_id = databaseId || placeholderId
   config.vars = {
     ...config.vars,
-    BETTER_AUTH_URL: production ? origin.origin : "http://localhost:3000",
-    TRACKER_ORIGIN: production ? origin.origin : "http://localhost:3000",
+    BETTER_AUTH_URL: production ? origin.origin : "http://localhost:3006",
+    TRACKER_ORIGIN: production ? origin.origin : "http://localhost:3006",
   }
   config.routes = production
     ? [{ pattern: origin.hostname, custom_domain: true }]

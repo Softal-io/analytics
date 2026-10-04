@@ -48,8 +48,7 @@
     }
   },
   "triggers": {
-    // Runs once daily at 00:10 UTC — rolls up the previous UTC day's raw
-    // rows into the daily_* tables (see src/lib/aggregate.ts).
-    "crons": ["10 0 * * *"]
+    // Repairs a bounded number of completed days in each site's timezone.
+    "crons": ["10 * * * *"]
   }
 }

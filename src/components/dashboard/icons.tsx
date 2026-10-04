@@ -3,7 +3,13 @@ import type { SVGProps } from "react"
 
 /** Referrer domain favicon via Google's favicon cache. */
 export function SourceIcon({ domain }: { domain: string }) {
-  if (!domain || domain === "(direct)") {
+  if (
+    !domain ||
+    domain === "(direct)" ||
+    domain === "(unknown)" ||
+    domain === "Direct" ||
+    domain === "Unknown"
+  ) {
     return <GlobeIcon size={20} className="size-5 shrink-0 text-kumo-subtle" />
   }
   return (

@@ -1,18 +1,27 @@
 import type { PublicMetric, PublicSection } from "@/lib/public-options"
 import type { RealtimeVisitorLocation } from "@/lib/realtime"
+import type { SourceDetails } from "@/lib/source-details"
 
 export interface PublicList {
-  rows: Array<{ label: string; count: number; country?: string }>
+  rows: Array<{
+    label: string
+    count: number
+    country?: string
+    url?: string
+    details?: SourceDetails
+    key?: string
+  }>
   total: number
 }
 export interface PublicSnapshot {
-  site: { name: string; domain: string }
+  site: { name: string; domain: string; timezone?: string }
   range: { fromDate: string; toDate: string }
   metrics: Partial<Record<PublicMetric, number>>
   sections: Partial<Record<PublicSection, PublicList>>
   chart?: Array<{ timestamp: number; visitors: number; pageviews: number }>
   realtime?: number
   realtimeLocations?: Array<RealtimeVisitorLocation>
+  sourceDetailsUrl?: string
 }
 
 /** Copy selected numbers explicitly; never serialize an internal summary. */

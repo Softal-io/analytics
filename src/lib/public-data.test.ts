@@ -4,8 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   loadPublicRealtime,
   loadPublicSnapshot,
+  loadPublicSourceDetails,
   loadPublicView,
 } from "./public-data"
+
+import { publicMetrics, publicSections } from "./public-options"
 
 const d1 = vi.hoisted(() => ({ prepare: vi.fn() }))
 const live = vi.hoisted(() => ({ count: vi.fn(), snapshot: vi.fn() }))
@@ -40,6 +43,11 @@ beforeEach(() => {
           statement.setReturnArrays(true)
           return Promise.resolve(statement.all(...values))
         },
+        run: () =>
+          Promise.resolve({
+            meta: database.prepare(query).run(...values),
+            results: [],
+          }),
       }
     },
   }))
@@ -50,6 +58,12 @@ beforeEach(() => {
     .prepare("INSERT INTO site_public_views VALUES (?, ?, ?, ?, ?, ?)")
     .run("site", "public-fixture", 1, "[]", '["events"]', 0)
   const pastDay = new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10)
+  const dayStart = Date.parse(`${pastDay}T00:00:00Z`) / 1000
+  database
+    .prepare(
+      "INSERT INTO daily_rollup_status (site_id, date, start_sec, end_sec, version) VALUES (?, ?, ?, ?, 2)"
+    )
+    .run("site", pastDay, dayStart, dayStart + 86400)
   for (let index = 0; index < 20; index++) {
     database
       .prepare("INSERT INTO daily_events VALUES (?, ?, ?, ?)")
@@ -59,6 +73,67 @@ beforeEach(() => {
 afterEach(() => database.close())
 
 describe("public event totals", () => {
+  it("checks current source sharing before returning cached URL details", async () => {
+    const now = Math.floor(Date.now() / 1000) - 60
+    database.exec(
+      "UPDATE site_public_views SET sections='[\"campaigns\"]'; INSERT INTO visitors VALUES ('visitor','site',0,0); INSERT INTO sources (site_id,referrer_domain,utm_source,utm_medium,utm_campaign) VALUES ('site','presentifyapp.com','Presentify','','')"
+    )
+    const source = database.prepare("SELECT id FROM sources").get()!.id
+    database
+      .prepare(
+        "INSERT INTO visits (id,site_id,visitor_id,started_at,ended_at,source_id,referrer_url,landing_url) VALUES ('visit','site','visitor',?,?,?,?,?)"
+      )
+      .run(
+        now,
+        now,
+        source,
+        "https://presentifyapp.com/offers",
+        "https://fixture.example/?utm_source=Presentify"
+      )
+    const input = {
+      view: "utm" as const,
+      key: JSON.stringify(["Presentify", "", ""]),
+    }
+    const details = await loadPublicSourceDetails("public-fixture", "7d", input)
+    expect(details?.links).toHaveLength(2)
+    expect(
+      database.prepare("SELECT COUNT(*) AS n FROM source_details_cache").get()
+        ?.n
+    ).toBe(1)
+    expect(
+      await loadPublicSourceDetails("public-fixture", "7d", {
+        view: "referrer",
+        key: "presentifyapp.com",
+      })
+    ).toBeUndefined()
+    database.exec("UPDATE site_public_views SET sections='[]'")
+    expect(
+      await loadPublicSourceDetails("public-fixture", "7d", input)
+    ).toBeUndefined()
+    database.exec(
+      "UPDATE site_public_views SET sections='[\"campaigns\"]',enabled=0"
+    )
+    expect(
+      await loadPublicSourceDetails("public-fixture", "7d", input)
+    ).toBeUndefined()
+  })
+  it("retains the original outbound URL when sharing link rows", async () => {
+    database.exec(`UPDATE site_public_views SET sections = '["outboundLinks"]'`)
+    const pastDay = new Date(Date.now() - 2 * 86400000)
+      .toISOString()
+      .slice(0, 10)
+    database
+      .prepare("INSERT INTO daily_outbound_links VALUES (?, ?, ?, ?)")
+      .run("site", pastDay, "http://vendor.example/Offer", 3)
+    const snapshot = await loadPublicSnapshot("public-fixture", "7d")
+    expect(snapshot?.sections.outboundLinks?.rows).toEqual([
+      {
+        label: "vendor.example/Offer",
+        count: 3,
+        url: "http://vendor.example/Offer",
+      },
+    ])
+  })
   it("keeps existing links count-only even when location lists are shared", async () => {
     for (const location of ["countries", "regions", "cities"]) {
       database
@@ -152,4 +227,18 @@ describe("public event totals", () => {
     expect(JSON.stringify(snapshot)).not.toContain("Leinster")
     expect(JSON.stringify(snapshot)).not.toContain("Dublin")
   })
+})
+
+it("shares one cache plan across every public section and stays within the query budget", async () => {
+  database
+    .prepare("UPDATE site_public_views SET metrics = ?, sections = ?")
+    .run(JSON.stringify(publicMetrics), JSON.stringify(publicSections))
+  d1.prepare.mockClear()
+  expect(await loadPublicSnapshot("public-fixture", "1y")).not.toBeNull()
+  expect(
+    d1.prepare.mock.calls.filter(([query]) =>
+      query.includes('from "daily_rollup_status"')
+    )
+  ).toHaveLength(1)
+  expect(d1.prepare.mock.calls.length).toBeLessThanOrEqual(50)
 })

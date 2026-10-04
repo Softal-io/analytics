@@ -6,7 +6,6 @@ import { LayerCard } from "@cloudflare/kumo/components/layer-card"
 import {
   CaretDownIcon,
   CodeIcon,
-  GlobeIcon,
   ShareNetworkIcon,
   TrashIcon,
   UserCircleIcon,
@@ -41,8 +40,15 @@ import {
 } from "@/components/dashboard/device-icons"
 import { OverviewCard } from "@/components/dashboard/overview-card"
 import { RankedList } from "@/components/dashboard/ranked-list"
-import { RealtimeGlobe } from "@/components/dashboard/realtime-globe"
+import { RecentActivityCard } from "@/components/dashboard/recent-activity-card"
+import { useAnalyticsData } from "@/hooks/use-analytics-data"
 import { useLiveVisitors } from "@/hooks/use-live-visitors"
+import { useSourceDetails } from "@/hooks/use-source-details"
+import { externalUrl, pageUrl } from "@/lib/dashboard-links"
+import {
+  SourceDetailsContent,
+  sourceHref,
+} from "@/components/dashboard/source-details"
 
 /** Server function — the dashboard's own UI reads its initial data this way. */
 const getDashboardData = createServerFn().handler(async () => {
@@ -91,16 +97,13 @@ interface TimeseriesPoint {
   visitors: number
 }
 
-async function fetchJson<T>(url: string, signal: AbortSignal): Promise<T> {
-  const res = await fetch(url, { signal })
-  if (!res.ok) throw new Error(`Request failed: ${res.status}`)
-  return await res.json()
-}
-
 interface TopListResponse<TRow> {
   rows: Array<TRow>
   total: number
   animateItems: boolean
+  loading: boolean
+  error?: string
+  retry: () => void
 }
 
 function useTopList<TRow>(
@@ -110,48 +113,29 @@ function useTopList<TRow>(
   view: string,
   animateViewChange: boolean
 ): TopListResponse<TRow> {
-  const [result, setResult] = useState<TopListResponse<TRow>>({
-    rows: [],
-    total: 0,
-    animateItems: false,
-  })
+  const request = useAnalyticsData<{ rows: Array<TRow>; total: number }>(
+    siteId
+      ? `/api/sites/${siteId}/${resource}?range=${range}&view=${view}`
+      : undefined
+  )
   const resolvedViewRef = useRef<string | null>(null)
-
+  const animateItems = Boolean(
+    request.data &&
+    animateViewChange &&
+    resolvedViewRef.current !== null &&
+    resolvedViewRef.current !== view
+  )
   useEffect(() => {
-    if (!siteId) return
-    const controller = new AbortController()
-    setResult((current) => ({
-      ...current,
-      rows: [],
-      total: 0,
-      animateItems: false,
-    }))
-
-    fetchJson<Omit<TopListResponse<TRow>, "animateItems">>(
-      `/api/sites/${siteId}/${resource}?range=${range}&view=${view}`,
-      controller.signal
-    )
-      .then((nextResult) => {
-        const shouldAnimate =
-          animateViewChange &&
-          resolvedViewRef.current !== null &&
-          resolvedViewRef.current !== view
-        resolvedViewRef.current = view
-        setResult({
-          ...nextResult,
-          animateItems: shouldAnimate,
-        })
-      })
-      .catch((error) => {
-        if (error instanceof Error && error.name !== "AbortError") {
-          console.error(error)
-        }
-      })
-
-    return () => controller.abort()
-  }, [siteId, range, resource, view, animateViewChange])
-
-  return result
+    if (request.data) resolvedViewRef.current = view
+  }, [request.data, view])
+  return {
+    rows: request.data?.rows ?? [],
+    total: request.data?.total ?? 0,
+    animateItems,
+    loading: request.loading,
+    error: request.error,
+    retry: request.retry,
+  }
 }
 
 const countryNames = new Intl.DisplayNames(["en"], { type: "region" })
@@ -223,9 +207,22 @@ function App() {
       : allSites[0]?.id
   const range = search.range ?? "30d"
 
-  const [summary, setSummary] = useState<SummaryResponse | null>(null)
-  const [points, setPoints] = useState<Array<TimeseriesPoint>>([])
-  const [eventRows, setEventRows] = useState<Array<TopEventRow>>([])
+  const base = selectedSiteId ? `/api/sites/${selectedSiteId}` : undefined
+  const summaryRequest = useAnalyticsData<SummaryResponse>(
+    base ? `${base}/summary?range=${range}` : undefined
+  )
+  const pointsRequest = useAnalyticsData<{ points: Array<TimeseriesPoint> }>(
+    base ? `${base}/timeseries?range=${range}` : undefined
+  )
+  const eventsRequest = useAnalyticsData<{
+    rows: Array<TopEventRow>
+    total: number
+  }>(base ? `${base}/activity?range=${range}` : undefined)
+  const summary = summaryRequest.data
+  const points = pointsRequest.data?.points ?? []
+  const eventRows = eventsRequest.data?.rows ?? []
+  const eventTotal = eventsRequest.data?.total ?? 0
+  const loading = summaryRequest.loading || pointsRequest.loading
   const [pageDimension, setPageDimension] = useState<PageDimension>("top")
   const [sourceDimension, setSourceDimension] =
     useState<SourceDimension>("referrer")
@@ -233,8 +230,6 @@ function App() {
     useState<DeviceDimension>("browser")
   const [locationDimension, setLocationDimension] =
     useState<LocationDimension>("country")
-  const [showLocationGlobe, setShowLocationGlobe] = useState(false)
-  const [loading, setLoading] = useState(false)
   const [addSiteOpen, setAddSiteOpen] = useState(false)
   const [deleteSiteId, setDeleteSiteId] = useState<string | null>(null)
   const [installSiteId, setInstallSiteId] = useState<string | null>(null)
@@ -245,6 +240,9 @@ function App() {
   const animateLocationFilterRef = useRef(false)
 
   const liveVisitors = useLiveVisitors(selectedSiteId)
+  const sourceDetails = useSourceDetails(
+    base ? `${base}/source-details?range=${range}` : undefined
+  )
   const pageList = useTopList<TopPageRow>(
     selectedSiteId,
     range,
@@ -258,6 +256,13 @@ function App() {
     "sources",
     sourceDimension,
     animateSourceFilterRef.current
+  )
+  const outboundList = useTopList<TopSourceRow>(
+    selectedSiteId,
+    range,
+    "sources",
+    "links",
+    false
   )
   const deviceList = useTopList<TopDeviceRow>(
     selectedSiteId,
@@ -273,40 +278,6 @@ function App() {
     locationDimension,
     animateLocationFilterRef.current
   )
-
-  useEffect(() => {
-    if (!selectedSiteId) return
-    const controller = new AbortController()
-    setLoading(true)
-
-    const base = `/api/sites/${selectedSiteId}`
-    Promise.all([
-      fetchJson<SummaryResponse>(
-        `${base}/summary?range=${range}`,
-        controller.signal
-      ),
-      fetchJson<{ points: Array<TimeseriesPoint> }>(
-        `${base}/timeseries?range=${range}`,
-        controller.signal
-      ),
-      fetchJson<{ rows: Array<TopEventRow> }>(
-        `${base}/activity?range=${range}`,
-        controller.signal
-      ),
-    ])
-      .then(([summaryRes, tsRes, eventsRes]) => {
-        setSummary(summaryRes)
-        setPoints(tsRes.points)
-        setEventRows(eventsRes.rows)
-      })
-      .catch((err) => {
-        if (err instanceof Error && err.name !== "AbortError")
-          console.error(err)
-      })
-      .finally(() => setLoading(false))
-
-    return () => controller.abort()
-  }, [selectedSiteId, range])
 
   function selectSite(id: string) {
     navigate({ to: "/", search: (prev) => ({ ...prev, site: id }) })
@@ -413,15 +384,6 @@ function App() {
               )}
             </DropdownMenu.Content>
           </DropdownMenu>
-          {liveVisitors.count !== null && liveVisitors.count > 0 ? (
-            <Badge
-              variant="success"
-              appearance="dot"
-              className="shrink-0 whitespace-nowrap"
-            >
-              {liveVisitors.count} online
-            </Badge>
-          ) : null}
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center gap-1">
@@ -505,14 +467,35 @@ function App() {
         </>
       )}
 
+      {(summaryRequest.error || pointsRequest.error) && (
+        <div
+          role="alert"
+          className="flex items-center justify-between gap-3 text-sm text-kumo-subtle"
+        >
+          <span>
+            Could not load the overview for this website and date range.
+          </span>
+          <Button
+            variant="ghost"
+            onClick={() => {
+              summaryRequest.retry()
+              pointsRequest.retry()
+            }}
+          >
+            Try again
+          </Button>
+        </div>
+      )}
       <OverviewCard
+        timezone={selectedSite.timezone}
         summary={summary ?? {}}
+        metrics={summaryRequest.error ? [] : undefined}
         points={points}
         loading={loading && points.length === 0}
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <LayerCard>
+        <LayerCard role="region" aria-label="Pages">
           <LayerCard.Secondary>
             <CardHeader
               title="Pages"
@@ -530,25 +513,52 @@ function App() {
           </LayerCard.Secondary>
           <LayerCard.Primary className="h-full p-2.5">
             <RankedList
+              loading={pageList.loading}
+              error={pageList.error}
+              onRetry={pageList.retry}
               items={pageList.rows.map((r) => ({
                 key: r.path,
                 label: r.path,
+                href: pageUrl(selectedSite.domain, r.path),
                 value: r.count,
               }))}
+              metricLabel={pageDimension === "top" ? "Pageviews" : "Visits"}
               total={pageList.total}
               animateItems={pageList.animateItems}
             />
           </LayerCard.Primary>
         </LayerCard>
 
-        <LayerCard>
+        <LayerCard role="region" aria-label="Outbound links">
+          <LayerCard.Secondary>Outbound links</LayerCard.Secondary>
+          <LayerCard.Primary className="h-full p-2.5">
+            <RankedList
+              loading={outboundList.loading}
+              error={outboundList.error}
+              onRetry={outboundList.retry}
+              items={outboundList.rows.map((r) => ({
+                key: r.key,
+                label: r.label,
+                href: externalUrl(r.key),
+                icon: r.referrerDomain ? (
+                  <SourceIcon domain={r.referrerDomain} />
+                ) : undefined,
+                value: r.visits,
+              }))}
+              metricLabel="Clicks"
+              total={outboundList.total}
+              emptyLabel="No outbound link clicks yet"
+            />
+          </LayerCard.Primary>
+        </LayerCard>
+
+        <LayerCard role="region" aria-label="Sources">
           <LayerCard.Secondary>
             <CardHeader
               title="Sources"
               tabs={[
                 { value: "referrer", label: "Referrers" },
-                { value: "links", label: "Links" },
-                { value: "utm", label: "UTM" },
+                { value: "utm", label: "Campaigns" },
               ]}
               value={sourceDimension}
               onValueChange={(value, animate) => {
@@ -559,14 +569,39 @@ function App() {
           </LayerCard.Secondary>
           <LayerCard.Primary className="h-full p-2.5">
             <RankedList
-              items={sourceList.rows.map((r) => ({
-                key: r.key,
-                label: r.label,
-                icon: r.referrerDomain ? (
-                  <SourceIcon domain={r.referrerDomain} />
-                ) : undefined,
-                value: r.visits,
-              }))}
+              loading={sourceList.loading}
+              error={sourceList.error}
+              onRetry={sourceList.retry}
+              items={sourceList.rows.map((r) => {
+                const view = sourceDimension === "utm" ? "utm" : "referrer"
+                const loaded = r.details
+                  ? sourceDetails.get(r.key, view, r.details)
+                  : undefined
+                const details = loaded?.details ?? r.details
+                return {
+                  key: r.key,
+                  label: r.label,
+                  href: sourceHref(details, r.referrerDomain),
+                  onDetailsOpen: r.details
+                    ? () => {
+                        void sourceDetails.load(r.key, view)
+                      }
+                    : undefined,
+                  details: details ? (
+                    <SourceDetailsContent
+                      details={details}
+                      loading={loaded?.loading}
+                      error={loaded?.error}
+                      retry={loaded?.retry}
+                    />
+                  ) : undefined,
+                  icon: r.referrerDomain ? (
+                    <SourceIcon domain={r.referrerDomain} />
+                  ) : undefined,
+                  value: r.visits,
+                }
+              })}
+              metricLabel="Visits"
               total={sourceList.total}
               animateItems={sourceList.animateItems}
               emptyLabel={
@@ -580,7 +615,14 @@ function App() {
           </LayerCard.Primary>
         </LayerCard>
 
-        <LayerCard>
+        <RecentActivityCard
+          unavailable={liveVisitors.unavailable}
+          count={liveVisitors.count}
+          locations={liveVisitors.locations}
+          simulate={import.meta.env.DEV && search.simulateLocations === true}
+        />
+
+        <LayerCard role="region" aria-label="Devices">
           <LayerCard.Secondary>
             <CardHeader
               title="Devices"
@@ -598,6 +640,9 @@ function App() {
           </LayerCard.Secondary>
           <LayerCard.Primary className="h-full p-2.5">
             <RankedList
+              loading={deviceList.loading}
+              error={deviceList.error}
+              onRetry={deviceList.retry}
               items={deviceList.rows.map((r) => ({
                 key: r.value,
                 label:
@@ -614,13 +659,14 @@ function App() {
                   ),
                 value: r.visits,
               }))}
+              metricLabel="Visits"
               total={deviceList.total}
               animateItems={deviceList.animateItems}
             />
           </LayerCard.Primary>
         </LayerCard>
 
-        <LayerCard>
+        <LayerCard role="region" aria-label="Locations">
           <LayerCard.Secondary>
             <CardHeader
               title="Locations"
@@ -628,69 +674,57 @@ function App() {
                 { value: "country", label: "Countries" },
                 { value: "region", label: "Regions" },
                 { value: "city", label: "Cities" },
-                {
-                  value: "globe",
-                  label: <GlobeIcon className="size-4" />,
-                  ariaLabel: "Realtime visitor globe",
-                  title: "Realtime visitor globe",
-                },
               ]}
-              value={showLocationGlobe ? "globe" : locationDimension}
+              value={locationDimension}
               onValueChange={(value, animate) => {
-                if (value === "globe") {
-                  setShowLocationGlobe(true)
-                  return
-                }
                 animateLocationFilterRef.current = animate
-                setShowLocationGlobe(false)
                 setLocationDimension(value as LocationDimension)
               }}
             />
           </LayerCard.Secondary>
-          <LayerCard.Primary
-            className={
-              showLocationGlobe ? "h-80 overflow-hidden p-0" : "h-full p-2.5"
-            }
-          >
-            {showLocationGlobe ? (
-              <RealtimeGlobe
-                count={liveVisitors.count ?? 0}
-                locations={liveVisitors.locations}
-                simulate={
-                  import.meta.env.DEV && search.simulateLocations === true
-                }
-              />
-            ) : (
-              <RankedList
-                items={locationList.rows.map((r) => ({
-                  key: `${r.country}-${r.region}-${r.city}`,
-                  label: locationLabel(r, locationDimension),
-                  icon: <CountryFlag country={r.country} />,
-                  value: r.visits,
-                }))}
-                total={locationList.total}
-                animateItems={locationList.animateItems}
-                emptyLabel={
-                  locationDimension === "region"
-                    ? "No region data yet"
-                    : locationDimension === "city"
-                      ? "No city data yet"
-                      : "No country data yet"
-                }
-              />
-            )}
+          <LayerCard.Primary className="h-full p-2.5">
+            <RankedList
+              loading={locationList.loading}
+              error={locationList.error}
+              onRetry={locationList.retry}
+              items={locationList.rows.map((r) => ({
+                key: `${r.country}-${r.region}-${r.city}`,
+                label: locationLabel(r, locationDimension),
+                icon: <CountryFlag country={r.country} />,
+                value: r.visits,
+              }))}
+              metricLabel="Visits"
+              total={locationList.total}
+              animateItems={locationList.animateItems}
+              emptyLabel={
+                locationDimension === "region"
+                  ? "No region data yet"
+                  : locationDimension === "city"
+                    ? "No city data yet"
+                    : "No country data yet"
+              }
+            />
           </LayerCard.Primary>
         </LayerCard>
 
-        <LayerCard className="sm:col-span-2">
+        <LayerCard
+          role="region"
+          aria-label="Custom events"
+          className="sm:col-span-2"
+        >
           <LayerCard.Secondary>Custom events</LayerCard.Secondary>
           <LayerCard.Primary className="h-full p-2.5">
             <RankedList
+              loading={eventsRequest.loading}
+              error={eventsRequest.error}
+              onRetry={eventsRequest.retry}
               items={eventRows.map((r) => ({
                 key: r.name,
                 label: r.name,
                 value: r.count,
               }))}
+              metricLabel="Events"
+              total={eventTotal}
               emptyLabel="No custom events yet"
             />
           </LayerCard.Primary>

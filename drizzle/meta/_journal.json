@@ -22,6 +22,48 @@
       "when": 1790882528375,
       "tag": "0002_redundant_hulk",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1790956986939,
+      "tag": "0003_elite_sprite",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1790964577553,
+      "tag": "0004_large_proemial_gods",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1790968751100,
+      "tag": "0005_sweet_veda",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1790972436947,
+      "tag": "0006_graceful_skin",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1790975181602,
+      "tag": "0007_wise_gwen_stacy",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1791039972170,
+      "tag": "0008_tearful_glorian",
+      "breakpoints": true
     }
   ]
 }

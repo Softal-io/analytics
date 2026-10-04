@@ -1,12 +1,7 @@
-import {
-  ChartLegend,
-  ChartPalette,
-  TimeseriesChart,
-} from "@cloudflare/kumo/components/chart"
+import { ChartLegend, ChartPalette } from "@cloudflare/kumo/components/chart"
 import { LayerCard } from "@cloudflare/kumo/components/layer-card"
-import { useMemo } from "react"
+import { TrafficChart } from "./traffic-chart"
 import type { PublicMetric } from "@/lib/public-options"
-import { echarts } from "@/lib/echarts"
 import {
   formatCompactNumber,
   formatDuration,
@@ -31,37 +26,30 @@ const metricStyles = {
   },
 }
 
+const metricDescriptions = {
+  visitors:
+    "Distinct recognized visitors across the selected date range. Daily chart counts can include the same visitor on different days.",
+  visits: "Sessions end after 30 minutes without tracked activity.",
+  pageviews: "Total recorded page loads and route changes.",
+  bounceRate:
+    "Visits without engagement: no more than 10 seconds of active time, no second pageview, and no outbound click or custom event. Historical visits use the previous pageview-based definition.",
+  avgDurationSeconds:
+    "Average visible, focused time per visit, including single-page visits. Historical visits retain first-to-last-pageview estimates.",
+}
+
 export function OverviewCard({
   summary,
   metrics = publicMetrics,
   points,
+  timezone = "UTC",
   loading = false,
 }: {
   summary: Partial<Record<PublicMetric, number>>
   metrics?: ReadonlyArray<PublicMetric>
   points?: Array<TimeseriesPoint>
+  timezone?: string
   loading?: boolean
 }) {
-  const series = useMemo(
-    () => [
-      {
-        name: "Pageviews",
-        color: ChartPalette.categorical(0),
-        data:
-          points?.map((p) => [p.timestamp, p.pageviews] as [number, number]) ??
-          [],
-      },
-      {
-        name: "Visitors",
-        color: ChartPalette.categorical(1),
-        data:
-          points?.map((p) => [p.timestamp, p.visitors] as [number, number]) ??
-          [],
-      },
-    ],
-    [points]
-  )
-
   if (metrics.length === 0 && points === undefined) return null
 
   return (
@@ -73,37 +61,38 @@ export function OverviewCard({
             {metrics.map((metric, index) => {
               const value = summary[metric] ?? 0
               return (
-                <ChartLegend.LargeItem
+                <div
                   key={metric}
-                  {...metricStyles[metric]}
-                  value={
-                    metric === "bounceRate"
-                      ? formatPercent(value)
-                      : metric === "avgDurationSeconds"
-                        ? formatDuration(value)
-                        : formatCompactNumber(value)
-                  }
-                  className={`min-w-0 border-neutral-100 sm:flex-1 ${
-                    index % 2 === 0 ? "pr-4" : "border-l pl-4"
-                  } ${
-                    index === 0
-                      ? "sm:border-l-0 sm:pr-4 sm:pl-0"
-                      : index === metrics.length - 1
-                        ? "sm:border-l sm:pr-0 sm:pl-4"
-                        : "sm:border-l sm:px-4"
-                  }`}
-                />
+                  title={metricDescriptions[metric]}
+                  className="min-w-0 sm:flex-1"
+                >
+                  <ChartLegend.LargeItem
+                    {...metricStyles[metric]}
+                    loading={loading}
+                    value={
+                      metric === "bounceRate"
+                        ? formatPercent(value)
+                        : metric === "avgDurationSeconds"
+                          ? formatDuration(value)
+                          : formatCompactNumber(value)
+                    }
+                    className={`min-w-0 border-neutral-100 sm:flex-1 ${
+                      index % 2 === 0 ? "pr-4" : "border-l pl-4"
+                    } ${
+                      index === 0
+                        ? "sm:border-l-0 sm:pr-4 sm:pl-0"
+                        : index === metrics.length - 1
+                          ? "sm:border-l sm:pr-0 sm:pl-4"
+                          : "sm:border-l sm:px-4"
+                    }`}
+                  />
+                </div>
               )
             })}
           </div>
         )}
         {points !== undefined && (
-          <TimeseriesChart
-            echarts={echarts}
-            data={series}
-            height={260}
-            loading={loading}
-          />
+          <TrafficChart points={points} timezone={timezone} loading={loading} />
         )}
       </LayerCard.Primary>
     </LayerCard>

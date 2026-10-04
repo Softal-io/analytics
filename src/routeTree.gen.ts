@@ -20,11 +20,13 @@ import { Route as ApiAuthSplatRouteImport } from './routes/api/auth.$'
 import { Route as ApiPublicSlugRouteImport } from './routes/api/public.$slug'
 import { Route as ApiSitesSiteIdRouteImport } from './routes/api/sites.$siteId'
 import { Route as ApiPublicSlugRealtimeRouteImport } from './routes/api/public.$slug.realtime'
+import { Route as ApiPublicSlugSourceDetailsRouteImport } from './routes/api/public.$slug.source-details'
 import { Route as ApiSitesSiteIdActivityRouteImport } from './routes/api/sites.$siteId.activity'
 import { Route as ApiSitesSiteIdDevicesRouteImport } from './routes/api/sites.$siteId.devices'
 import { Route as ApiSitesSiteIdLocationsRouteImport } from './routes/api/sites.$siteId.locations'
 import { Route as ApiSitesSiteIdPagesRouteImport } from './routes/api/sites.$siteId.pages'
 import { Route as ApiSitesSiteIdPublicViewRouteImport } from './routes/api/sites.$siteId.public-view'
+import { Route as ApiSitesSiteIdSourceDetailsRouteImport } from './routes/api/sites.$siteId.source-details'
 import { Route as ApiSitesSiteIdSourcesRouteImport } from './routes/api/sites.$siteId.sources'
 import { Route as ApiSitesSiteIdSummaryRouteImport } from './routes/api/sites.$siteId.summary'
 import { Route as ApiSitesSiteIdTimeseriesRouteImport } from './routes/api/sites.$siteId.timeseries'
@@ -85,6 +87,12 @@ const ApiPublicSlugRealtimeRoute = ApiPublicSlugRealtimeRouteImport.update({
   path: '/realtime',
   getParentRoute: () => ApiPublicSlugRoute,
 } as any)
+const ApiPublicSlugSourceDetailsRoute =
+  ApiPublicSlugSourceDetailsRouteImport.update({
+    id: '/source-details',
+    path: '/source-details',
+    getParentRoute: () => ApiPublicSlugRoute,
+  } as any)
 const ApiSitesSiteIdActivityRoute = ApiSitesSiteIdActivityRouteImport.update({
   id: '/activity',
   path: '/activity',
@@ -109,6 +117,12 @@ const ApiSitesSiteIdPublicViewRoute =
   ApiSitesSiteIdPublicViewRouteImport.update({
     id: '/public-view',
     path: '/public-view',
+    getParentRoute: () => ApiSitesSiteIdRoute,
+  } as any)
+const ApiSitesSiteIdSourceDetailsRoute =
+  ApiSitesSiteIdSourceDetailsRouteImport.update({
+    id: '/source-details',
+    path: '/source-details',
     getParentRoute: () => ApiSitesSiteIdRoute,
   } as any)
 const ApiSitesSiteIdSourcesRoute = ApiSitesSiteIdSourcesRouteImport.update({
@@ -146,11 +160,13 @@ export interface FileRoutesByFullPath {
   '/api/public/$slug': typeof ApiPublicSlugRouteWithChildren
   '/api/sites/$siteId': typeof ApiSitesSiteIdRouteWithChildren
   '/api/public/$slug/realtime': typeof ApiPublicSlugRealtimeRoute
+  '/api/public/$slug/source-details': typeof ApiPublicSlugSourceDetailsRoute
   '/api/sites/$siteId/activity': typeof ApiSitesSiteIdActivityRoute
   '/api/sites/$siteId/devices': typeof ApiSitesSiteIdDevicesRoute
   '/api/sites/$siteId/locations': typeof ApiSitesSiteIdLocationsRoute
   '/api/sites/$siteId/pages': typeof ApiSitesSiteIdPagesRoute
   '/api/sites/$siteId/public-view': typeof ApiSitesSiteIdPublicViewRoute
+  '/api/sites/$siteId/source-details': typeof ApiSitesSiteIdSourceDetailsRoute
   '/api/sites/$siteId/sources': typeof ApiSitesSiteIdSourcesRoute
   '/api/sites/$siteId/summary': typeof ApiSitesSiteIdSummaryRoute
   '/api/sites/$siteId/timeseries': typeof ApiSitesSiteIdTimeseriesRoute
@@ -168,11 +184,13 @@ export interface FileRoutesByTo {
   '/api/public/$slug': typeof ApiPublicSlugRouteWithChildren
   '/api/sites/$siteId': typeof ApiSitesSiteIdRouteWithChildren
   '/api/public/$slug/realtime': typeof ApiPublicSlugRealtimeRoute
+  '/api/public/$slug/source-details': typeof ApiPublicSlugSourceDetailsRoute
   '/api/sites/$siteId/activity': typeof ApiSitesSiteIdActivityRoute
   '/api/sites/$siteId/devices': typeof ApiSitesSiteIdDevicesRoute
   '/api/sites/$siteId/locations': typeof ApiSitesSiteIdLocationsRoute
   '/api/sites/$siteId/pages': typeof ApiSitesSiteIdPagesRoute
   '/api/sites/$siteId/public-view': typeof ApiSitesSiteIdPublicViewRoute
+  '/api/sites/$siteId/source-details': typeof ApiSitesSiteIdSourceDetailsRoute
   '/api/sites/$siteId/sources': typeof ApiSitesSiteIdSourcesRoute
   '/api/sites/$siteId/summary': typeof ApiSitesSiteIdSummaryRoute
   '/api/sites/$siteId/timeseries': typeof ApiSitesSiteIdTimeseriesRoute
@@ -191,11 +209,13 @@ export interface FileRoutesById {
   '/api/public/$slug': typeof ApiPublicSlugRouteWithChildren
   '/api/sites/$siteId': typeof ApiSitesSiteIdRouteWithChildren
   '/api/public/$slug/realtime': typeof ApiPublicSlugRealtimeRoute
+  '/api/public/$slug/source-details': typeof ApiPublicSlugSourceDetailsRoute
   '/api/sites/$siteId/activity': typeof ApiSitesSiteIdActivityRoute
   '/api/sites/$siteId/devices': typeof ApiSitesSiteIdDevicesRoute
   '/api/sites/$siteId/locations': typeof ApiSitesSiteIdLocationsRoute
   '/api/sites/$siteId/pages': typeof ApiSitesSiteIdPagesRoute
   '/api/sites/$siteId/public-view': typeof ApiSitesSiteIdPublicViewRoute
+  '/api/sites/$siteId/source-details': typeof ApiSitesSiteIdSourceDetailsRoute
   '/api/sites/$siteId/sources': typeof ApiSitesSiteIdSourcesRoute
   '/api/sites/$siteId/summary': typeof ApiSitesSiteIdSummaryRoute
   '/api/sites/$siteId/timeseries': typeof ApiSitesSiteIdTimeseriesRoute
@@ -215,11 +235,13 @@ export interface FileRouteTypes {
     | '/api/public/$slug'
     | '/api/sites/$siteId'
     | '/api/public/$slug/realtime'
+    | '/api/public/$slug/source-details'
     | '/api/sites/$siteId/activity'
     | '/api/sites/$siteId/devices'
     | '/api/sites/$siteId/locations'
     | '/api/sites/$siteId/pages'
     | '/api/sites/$siteId/public-view'
+    | '/api/sites/$siteId/source-details'
     | '/api/sites/$siteId/sources'
     | '/api/sites/$siteId/summary'
     | '/api/sites/$siteId/timeseries'
@@ -237,11 +259,13 @@ export interface FileRouteTypes {
     | '/api/public/$slug'
     | '/api/sites/$siteId'
     | '/api/public/$slug/realtime'
+    | '/api/public/$slug/source-details'
     | '/api/sites/$siteId/activity'
     | '/api/sites/$siteId/devices'
     | '/api/sites/$siteId/locations'
     | '/api/sites/$siteId/pages'
     | '/api/sites/$siteId/public-view'
+    | '/api/sites/$siteId/source-details'
     | '/api/sites/$siteId/sources'
     | '/api/sites/$siteId/summary'
     | '/api/sites/$siteId/timeseries'
@@ -259,11 +283,13 @@ export interface FileRouteTypes {
     | '/api/public/$slug'
     | '/api/sites/$siteId'
     | '/api/public/$slug/realtime'
+    | '/api/public/$slug/source-details'
     | '/api/sites/$siteId/activity'
     | '/api/sites/$siteId/devices'
     | '/api/sites/$siteId/locations'
     | '/api/sites/$siteId/pages'
     | '/api/sites/$siteId/public-view'
+    | '/api/sites/$siteId/source-details'
     | '/api/sites/$siteId/sources'
     | '/api/sites/$siteId/summary'
     | '/api/sites/$siteId/timeseries'
@@ -361,6 +387,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicSlugRealtimeRouteImport
       parentRoute: typeof ApiPublicSlugRoute
     }
+    '/api/public/$slug/source-details': {
+      id: '/api/public/$slug/source-details'
+      path: '/source-details'
+      fullPath: '/api/public/$slug/source-details'
+      preLoaderRoute: typeof ApiPublicSlugSourceDetailsRouteImport
+      parentRoute: typeof ApiPublicSlugRoute
+    }
     '/api/sites/$siteId/activity': {
       id: '/api/sites/$siteId/activity'
       path: '/activity'
@@ -394,6 +427,13 @@ declare module '@tanstack/react-router' {
       path: '/public-view'
       fullPath: '/api/sites/$siteId/public-view'
       preLoaderRoute: typeof ApiSitesSiteIdPublicViewRouteImport
+      parentRoute: typeof ApiSitesSiteIdRoute
+    }
+    '/api/sites/$siteId/source-details': {
+      id: '/api/sites/$siteId/source-details'
+      path: '/source-details'
+      fullPath: '/api/sites/$siteId/source-details'
+      preLoaderRoute: typeof ApiSitesSiteIdSourceDetailsRouteImport
       parentRoute: typeof ApiSitesSiteIdRoute
     }
     '/api/sites/$siteId/sources': {
@@ -433,6 +473,7 @@ interface ApiSitesSiteIdRouteChildren {
   ApiSitesSiteIdLocationsRoute: typeof ApiSitesSiteIdLocationsRoute
   ApiSitesSiteIdPagesRoute: typeof ApiSitesSiteIdPagesRoute
   ApiSitesSiteIdPublicViewRoute: typeof ApiSitesSiteIdPublicViewRoute
+  ApiSitesSiteIdSourceDetailsRoute: typeof ApiSitesSiteIdSourceDetailsRoute
   ApiSitesSiteIdSourcesRoute: typeof ApiSitesSiteIdSourcesRoute
   ApiSitesSiteIdSummaryRoute: typeof ApiSitesSiteIdSummaryRoute
   ApiSitesSiteIdTimeseriesRoute: typeof ApiSitesSiteIdTimeseriesRoute
@@ -445,6 +486,7 @@ const ApiSitesSiteIdRouteChildren: ApiSitesSiteIdRouteChildren = {
   ApiSitesSiteIdLocationsRoute: ApiSitesSiteIdLocationsRoute,
   ApiSitesSiteIdPagesRoute: ApiSitesSiteIdPagesRoute,
   ApiSitesSiteIdPublicViewRoute: ApiSitesSiteIdPublicViewRoute,
+  ApiSitesSiteIdSourceDetailsRoute: ApiSitesSiteIdSourceDetailsRoute,
   ApiSitesSiteIdSourcesRoute: ApiSitesSiteIdSourcesRoute,
   ApiSitesSiteIdSummaryRoute: ApiSitesSiteIdSummaryRoute,
   ApiSitesSiteIdTimeseriesRoute: ApiSitesSiteIdTimeseriesRoute,
@@ -469,10 +511,12 @@ const ApiSitesRouteWithChildren = ApiSitesRoute._addFileChildren(
 
 interface ApiPublicSlugRouteChildren {
   ApiPublicSlugRealtimeRoute: typeof ApiPublicSlugRealtimeRoute
+  ApiPublicSlugSourceDetailsRoute: typeof ApiPublicSlugSourceDetailsRoute
 }
 
 const ApiPublicSlugRouteChildren: ApiPublicSlugRouteChildren = {
   ApiPublicSlugRealtimeRoute: ApiPublicSlugRealtimeRoute,
+  ApiPublicSlugSourceDetailsRoute: ApiPublicSlugSourceDetailsRoute,
 }
 
 const ApiPublicSlugRouteWithChildren = ApiPublicSlugRoute._addFileChildren(

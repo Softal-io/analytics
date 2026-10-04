@@ -3,13 +3,13 @@
  *
  * visitor_id = sha256(site_id + CF-Connecting-IP + User-Agent), truncated
  * to 16 bytes (32 hex chars). No date component — the same person gets the
- * same id across days so multi-day uniques are accurate, not summed
- * daily approximations.
+ * same id across days so multi-day counts can be deduplicated. This
+ * estimates people: shared networks/devices and changing IPs affect identity.
  */
 export async function computeVisitorId(
   siteId: string,
   ip: string,
-  userAgent: string,
+  userAgent: string
 ): Promise<string> {
   const input = `${siteId}:${ip}:${userAgent}`
   const data = new TextEncoder().encode(input)

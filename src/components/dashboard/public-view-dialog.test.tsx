@@ -37,7 +37,7 @@ describe("public globe sharing consent", () => {
       />
     )
     const globe = await screen.findByLabelText<HTMLInputElement>(
-      "Live location globe"
+      "Recent activity globe"
     )
     expect(globe.checked).toBe(false)
     expect(globe.disabled).toBe(true)
@@ -73,7 +73,9 @@ describe("public globe sharing consent", () => {
     expect(globe.checked).toBe(false)
     fireEvent.click(globe)
     fireEvent.click(
-      screen.getByLabelText("Live visitor count", { exact: true })
+      screen.getByLabelText("Visitors active in the last 5 minutes", {
+        exact: true,
+      })
     )
     expect(globe.checked).toBe(false)
     expect(globe.disabled).toBe(true)

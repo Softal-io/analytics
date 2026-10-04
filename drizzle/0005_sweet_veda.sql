@@ -1,0 +1,2 @@
+ALTER TABLE `daily_rollup_status` ADD `version` integer DEFAULT 1 NOT NULL;--> statement-breakpoint
+CREATE INDEX `idx_visits_site_ended_started_visitor` ON `visits` (`site_id`,`ended_at`,`started_at`,`visitor_id`);

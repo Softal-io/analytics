@@ -1,4 +1,12 @@
-import { and, eq, gte, isNotNull, lt, lte, ne, or, sql } from "drizzle-orm"
+import { and, eq, isNotNull, ne, or, sql } from "drizzle-orm"
+import {
+  cachedDateFilter,
+  getReportingSlices,
+  rawTimeFilter,
+} from "./reporting-slices"
+import { OMITTED_OUTBOUND_URL } from "./analytics-config"
+import type { ReportingSlices } from "./reporting-slices"
+import type { SourceDetails } from "./source-details"
 import type { Site } from "@/db/schema"
 import type { ResolvedRange } from "@/lib/dates"
 import { db } from "@/db"
@@ -17,14 +25,6 @@ import {
   sources,
   visits,
 } from "@/db/schema"
-import { splitRangeForQuery, startOfDayUtcMs } from "@/lib/dates"
-
-function todayBounds(site: Site, resolved: ResolvedRange) {
-  return {
-    startSec: Math.floor(startOfDayUtcMs(resolved.today, site.timezone) / 1000),
-    endSec: Math.floor(Date.now() / 1000),
-  }
-}
 
 export interface TopListResult<TRow> {
   rows: Array<TRow>
@@ -58,11 +58,13 @@ export async function computeTopPages(
   site: Site,
   resolved: ResolvedRange,
   dimension: PageDimension = "top",
-  limit = 10
+  limit = 10,
+  reporting?: ReportingSlices
 ): Promise<TopListResult<TopPageRow>> {
-  const { rollupBounds, includesToday } = splitRangeForQuery(resolved)
+  const slices = reporting ?? (await getReportingSlices(site, resolved))
+  const hasCached = slices.cached.length > 0
+  const hasRaw = slices.raw.length > 0
   const merged = new Map<string, number>()
-  const { startSec, endSec } = todayBounds(site, resolved)
   const rollupMetric =
     dimension === "entered"
       ? dailyPages.entrances
@@ -70,7 +72,7 @@ export async function computeTopPages(
         ? dailyPages.exits
         : dailyPages.pageviews
 
-  const rollupRows = rollupBounds
+  const rollupRows = hasCached
     ? await db
         .select({
           path: dailyPages.path,
@@ -80,8 +82,7 @@ export async function computeTopPages(
         .where(
           and(
             eq(dailyPages.siteId, site.id),
-            gte(dailyPages.date, rollupBounds.from),
-            lte(dailyPages.date, rollupBounds.to)
+            cachedDateFilter(dailyPages.date, slices)
           )
         )
         .groupBy(dailyPages.path)
@@ -91,30 +92,26 @@ export async function computeTopPages(
     merged.set(row.path, Number(row.count))
   }
 
-  if (includesToday) {
+  if (hasRaw) {
     if (dimension === "top") {
-      const todayRows = await db
+      const rawRows = await db
         .select({
           path: pages.path,
           count: sql<number>`COUNT(*)`,
         })
         .from(pages)
         .where(
-          and(
-            eq(pages.siteId, site.id),
-            gte(pages.timestamp, startSec),
-            lt(pages.timestamp, endSec)
-          )
+          and(eq(pages.siteId, site.id), rawTimeFilter(pages.timestamp, slices))
         )
         .groupBy(pages.path)
 
-      for (const row of todayRows) {
+      for (const row of rawRows) {
         merged.set(row.path, (merged.get(row.path) ?? 0) + Number(row.count))
       }
     } else {
       const pageColumn =
         dimension === "entered" ? visits.entryPage : visits.exitPage
-      const todayRows = await db
+      const rawRows = await db
         .select({
           path: pageColumn,
           count: sql<number>`COUNT(*)`,
@@ -123,14 +120,13 @@ export async function computeTopPages(
         .where(
           and(
             eq(visits.siteId, site.id),
-            gte(visits.startedAt, startSec),
-            lt(visits.startedAt, endSec),
+            rawTimeFilter(visits.startedAt, slices),
             isNotNull(pageColumn)
           )
         )
         .groupBy(pageColumn)
 
-      for (const row of todayRows) {
+      for (const row of rawRows) {
         if (!row.path) continue
         merged.set(row.path, (merged.get(row.path) ?? 0) + Number(row.count))
       }
@@ -155,6 +151,7 @@ export interface TopSourceRow {
   label: string
   referrerDomain?: string
   visits: number
+  details?: SourceDetails
 }
 
 function formatUtmLabel(
@@ -171,15 +168,17 @@ export async function computeTopSources(
   site: Site,
   resolved: ResolvedRange,
   dimension: SourceDimension = "referrer",
-  limit = 10
+  limit = 10,
+  reporting?: ReportingSlices
 ): Promise<TopListResult<TopSourceRow>> {
-  const { rollupBounds, includesToday } = splitRangeForQuery(resolved)
-  const { startSec, endSec } = todayBounds(site, resolved)
+  const slices = reporting ?? (await getReportingSlices(site, resolved))
+  const hasCached = slices.cached.length > 0
+  const hasRaw = slices.raw.length > 0
   const merged = new Map<string, TopSourceRow>()
 
   if (dimension === "links") {
-    const [rollupRows, todayRows] = await Promise.all([
-      rollupBounds
+    const [rollupRows, rawRows] = await Promise.all([
+      hasCached
         ? db
             .select({
               url: dailyOutboundLinks.url,
@@ -189,13 +188,12 @@ export async function computeTopSources(
             .where(
               and(
                 eq(dailyOutboundLinks.siteId, site.id),
-                gte(dailyOutboundLinks.date, rollupBounds.from),
-                lte(dailyOutboundLinks.date, rollupBounds.to)
+                cachedDateFilter(dailyOutboundLinks.date, slices)
               )
             )
             .groupBy(dailyOutboundLinks.url)
         : Promise.resolve([]),
-      includesToday
+      hasRaw
         ? db
             .select({
               url: outboundLinks.url,
@@ -205,20 +203,25 @@ export async function computeTopSources(
             .where(
               and(
                 eq(outboundLinks.siteId, site.id),
-                gte(outboundLinks.timestamp, startSec),
-                lt(outboundLinks.timestamp, endSec)
+                rawTimeFilter(outboundLinks.timestamp, slices)
               )
             )
             .groupBy(outboundLinks.url)
         : Promise.resolve([]),
     ])
 
-    for (const row of [...rollupRows, ...todayRows]) {
+    for (const row of [...rollupRows, ...rawRows]) {
       const existing = merged.get(row.url)
       merged.set(row.url, {
         key: row.url,
-        label: row.url.replace(/^https?:\/\//, ""),
-        referrerDomain: new URL(row.url).hostname,
+        label:
+          row.url === OMITTED_OUTBOUND_URL
+            ? "URL exceeds recording limit"
+            : row.url.replace(/^https?:\/\//, ""),
+        referrerDomain:
+          row.url === OMITTED_OUTBOUND_URL
+            ? undefined
+            : new URL(row.url).hostname,
         visits: (existing?.visits ?? 0) + Number(row.clicks),
       })
     }
@@ -233,8 +236,8 @@ export async function computeTopSources(
       ne(sources.utmMedium, ""),
       ne(sources.utmCampaign, "")
     )
-    const [rollupRows, todayRows] = await Promise.all([
-      rollupBounds
+    const [rollupRows, rawRows] = await Promise.all([
+      hasCached
         ? db
             .select({
               utmSource: dailySources.utmSource,
@@ -246,8 +249,7 @@ export async function computeTopSources(
             .where(
               and(
                 eq(dailySources.siteId, site.id),
-                gte(dailySources.date, rollupBounds.from),
-                lte(dailySources.date, rollupBounds.to),
+                cachedDateFilter(dailySources.date, slices),
                 hasUtmRollup
               )
             )
@@ -257,7 +259,7 @@ export async function computeTopSources(
               dailySources.utmCampaign
             )
         : Promise.resolve([]),
-      includesToday
+      hasRaw
         ? db
             .select({
               utmSource: sources.utmSource,
@@ -270,8 +272,7 @@ export async function computeTopSources(
             .where(
               and(
                 eq(visits.siteId, site.id),
-                gte(visits.startedAt, startSec),
-                lt(visits.startedAt, endSec),
+                rawTimeFilter(visits.startedAt, slices),
                 hasUtmRaw
               )
             )
@@ -279,21 +280,28 @@ export async function computeTopSources(
         : Promise.resolve([]),
     ])
 
-    for (const row of [...rollupRows, ...todayRows]) {
+    for (const row of [...rollupRows, ...rawRows]) {
       const source = row.utmSource ?? ""
       const medium = row.utmMedium ?? ""
       const campaign = row.utmCampaign ?? ""
-      const key = `${source}\u0000${medium}\u0000${campaign}`
+      const key = JSON.stringify([source, medium, campaign])
       const existing = merged.get(key)
       merged.set(key, {
         key,
         label: formatUtmLabel(source, medium, campaign),
         visits: (existing?.visits ?? 0) + Number(row.visits),
+        details: {
+          utmSource: source,
+          utmMedium: medium,
+          utmCampaign: campaign,
+          links: [],
+          linkCount: 0,
+        },
       })
     }
   } else {
-    const [rollupRows, todayRows] = await Promise.all([
-      rollupBounds
+    const [rollupRows, rawRows] = await Promise.all([
+      hasCached
         ? db
             .select({
               referrerDomain: dailySources.referrerDomain,
@@ -303,13 +311,12 @@ export async function computeTopSources(
             .where(
               and(
                 eq(dailySources.siteId, site.id),
-                gte(dailySources.date, rollupBounds.from),
-                lte(dailySources.date, rollupBounds.to)
+                cachedDateFilter(dailySources.date, slices)
               )
             )
             .groupBy(dailySources.referrerDomain)
         : Promise.resolve([]),
-      includesToday
+      hasRaw
         ? db
             .select({
               referrerDomain: sources.referrerDomain,
@@ -320,26 +327,40 @@ export async function computeTopSources(
             .where(
               and(
                 eq(visits.siteId, site.id),
-                gte(visits.startedAt, startSec),
-                lt(visits.startedAt, endSec)
+                rawTimeFilter(visits.startedAt, slices)
               )
             )
             .groupBy(sources.referrerDomain)
         : Promise.resolve([]),
     ])
 
-    for (const row of [...rollupRows, ...todayRows]) {
+    for (const row of [...rollupRows, ...rawRows]) {
       const existing = merged.get(row.referrerDomain)
       merged.set(row.referrerDomain, {
         key: row.referrerDomain,
-        label: row.referrerDomain,
+        label:
+          row.referrerDomain === "(direct)"
+            ? "Direct"
+            : row.referrerDomain === "(unknown)"
+              ? "Unknown"
+              : row.referrerDomain,
         referrerDomain: row.referrerDomain,
+        details: {
+          referrerDomain: row.referrerDomain,
+          links: [],
+          linkCount: 0,
+        },
         visits: (existing?.visits ?? 0) + Number(row.visits),
       })
     }
   }
 
-  return rankRows(Array.from(merged.values()), (row) => row.visits, limit)
+  const result = rankRows(
+    Array.from(merged.values()),
+    (row) => row.visits,
+    limit
+  )
+  return result
 }
 
 // ---------------------------------------------------------------------------
@@ -357,10 +378,12 @@ export async function computeTopDevices(
   site: Site,
   resolved: ResolvedRange,
   dimension: DeviceDimension = "browser",
-  limit = 10
+  limit = 10,
+  reporting?: ReportingSlices
 ): Promise<TopListResult<TopDeviceRow>> {
-  const { rollupBounds, includesToday } = splitRangeForQuery(resolved)
-  const { startSec, endSec } = todayBounds(site, resolved)
+  const slices = reporting ?? (await getReportingSlices(site, resolved))
+  const hasCached = slices.cached.length > 0
+  const hasRaw = slices.raw.length > 0
   const merged = new Map<string, number>()
   const rollupColumn =
     dimension === "os"
@@ -375,8 +398,8 @@ export async function computeTopDevices(
         ? devices.deviceType
         : devices.browser
 
-  const [rollupRows, todayRows] = await Promise.all([
-    rollupBounds
+  const [rollupRows, rawRows] = await Promise.all([
+    hasCached
       ? db
           .select({
             value: rollupColumn,
@@ -386,13 +409,12 @@ export async function computeTopDevices(
           .where(
             and(
               eq(dailyDevices.siteId, site.id),
-              gte(dailyDevices.date, rollupBounds.from),
-              lte(dailyDevices.date, rollupBounds.to)
+              cachedDateFilter(dailyDevices.date, slices)
             )
           )
           .groupBy(rollupColumn)
       : Promise.resolve([]),
-    includesToday
+    hasRaw
       ? db
           .select({
             value: rawColumn,
@@ -403,15 +425,14 @@ export async function computeTopDevices(
           .where(
             and(
               eq(visits.siteId, site.id),
-              gte(visits.startedAt, startSec),
-              lt(visits.startedAt, endSec)
+              rawTimeFilter(visits.startedAt, slices)
             )
           )
           .groupBy(rawColumn)
       : Promise.resolve([]),
   ])
 
-  for (const row of [...rollupRows, ...todayRows]) {
+  for (const row of [...rollupRows, ...rawRows]) {
     if (!row.value) continue
     merged.set(row.value, (merged.get(row.value) ?? 0) + Number(row.visits))
   }
@@ -443,10 +464,12 @@ export async function computeTopLocations(
   site: Site,
   resolved: ResolvedRange,
   dimension: LocationDimension = "country",
-  limit = 10
+  limit = 10,
+  reporting?: ReportingSlices
 ): Promise<TopListResult<TopLocationRow>> {
-  const { rollupBounds, includesToday } = splitRangeForQuery(resolved)
-  const { startSec, endSec } = todayBounds(site, resolved)
+  const slices = reporting ?? (await getReportingSlices(site, resolved))
+  const hasCached = slices.cached.length > 0
+  const hasRaw = slices.raw.length > 0
   const merged = new Map<string, TopLocationRow>()
   const rollupRegion =
     dimension === "country" ? sql<string>`''` : dailyLocations.region
@@ -455,7 +478,7 @@ export async function computeTopLocations(
   const rawRegion = dimension === "country" ? sql<string>`''` : locations.region
   const rawCity = dimension === "city" ? locations.city : sql<string>`''`
 
-  const rollupRows = rollupBounds
+  const rollupRows = hasCached
     ? await db
         .select({
           country: dailyLocations.country,
@@ -467,8 +490,7 @@ export async function computeTopLocations(
         .where(
           and(
             eq(dailyLocations.siteId, site.id),
-            gte(dailyLocations.date, rollupBounds.from),
-            lte(dailyLocations.date, rollupBounds.to),
+            cachedDateFilter(dailyLocations.date, slices),
             dimension === "region" ? ne(dailyLocations.region, "") : undefined,
             dimension === "city" ? ne(dailyLocations.city, "") : undefined
           )
@@ -476,7 +498,7 @@ export async function computeTopLocations(
         .groupBy(dailyLocations.country, rollupRegion, rollupCity)
     : []
 
-  const todayRows = includesToday
+  const rawRows = hasRaw
     ? await db
         .select({
           country: locations.country,
@@ -489,8 +511,7 @@ export async function computeTopLocations(
         .where(
           and(
             eq(visits.siteId, site.id),
-            gte(visits.startedAt, startSec),
-            lt(visits.startedAt, endSec),
+            rawTimeFilter(visits.startedAt, slices),
             dimension === "region" ? ne(locations.region, "") : undefined,
             dimension === "city" ? ne(locations.city, "") : undefined
           )
@@ -498,7 +519,7 @@ export async function computeTopLocations(
         .groupBy(locations.country, rawRegion, rawCity)
     : []
 
-  for (const row of [...rollupRows, ...todayRows]) {
+  for (const row of [...rollupRows, ...rawRows]) {
     const region = dimension === "country" ? "" : (row.region ?? "")
     const city = dimension === "city" ? (row.city ?? "") : ""
     const key = `${row.country}\u0000${region}\u0000${city}`
@@ -526,14 +547,16 @@ export interface TopEventRow {
 export async function computeEventList(
   site: Site,
   resolved: ResolvedRange,
-  limit = 10
+  limit = 10,
+  reporting?: ReportingSlices
 ): Promise<TopListResult<TopEventRow>> {
-  const { rollupBounds, includesToday } = splitRangeForQuery(resolved)
+  const slices = reporting ?? (await getReportingSlices(site, resolved))
+  const hasCached = slices.cached.length > 0
+  const hasRaw = slices.raw.length > 0
   const merged = new Map<string, number>()
-  const { startSec, endSec } = todayBounds(site, resolved)
 
-  const [rollupRows, todayRows] = await Promise.all([
-    rollupBounds
+  const [rollupRows, rawRows] = await Promise.all([
+    hasCached
       ? db
           .select({
             name: dailyEvents.name,
@@ -543,21 +566,19 @@ export async function computeEventList(
           .where(
             and(
               eq(dailyEvents.siteId, site.id),
-              gte(dailyEvents.date, rollupBounds.from),
-              lte(dailyEvents.date, rollupBounds.to)
+              cachedDateFilter(dailyEvents.date, slices)
             )
           )
           .groupBy(dailyEvents.name)
       : Promise.resolve([]),
-    includesToday
+    hasRaw
       ? db
           .select({ name: events.name, count: sql<number>`COUNT(*)` })
           .from(events)
           .where(
             and(
               eq(events.siteId, site.id),
-              gte(events.timestamp, startSec),
-              lt(events.timestamp, endSec)
+              rawTimeFilter(events.timestamp, slices)
             )
           )
           .groupBy(events.name)
@@ -565,7 +586,7 @@ export async function computeEventList(
   ])
 
   for (const row of rollupRows) merged.set(row.name, Number(row.count))
-  for (const row of todayRows) {
+  for (const row of rawRows) {
     merged.set(row.name, (merged.get(row.name) ?? 0) + Number(row.count))
   }
 
@@ -580,7 +601,8 @@ export async function computeEventList(
 export async function computeTopEvents(
   site: Site,
   resolved: ResolvedRange,
-  limit = 10
+  limit = 10,
+  reporting?: ReportingSlices
 ): Promise<Array<TopEventRow>> {
-  return (await computeEventList(site, resolved, limit)).rows
+  return (await computeEventList(site, resolved, limit, reporting)).rows
 }
