@@ -36,7 +36,6 @@ export const Route = createFileRoute("/public/$slug")({
           ? `${loaderData.site.name} · Public analytics`
           : "Public analytics",
       },
-      { name: "robots", content: "noindex, nofollow" },
     ],
   }),
   component: PublicView,

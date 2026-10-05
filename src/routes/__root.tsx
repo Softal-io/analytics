@@ -14,6 +14,10 @@ export const Route = createRootRoute({
       {
         title: "Web Analytics",
       },
+      {
+        name: "robots",
+        content: "noindex, nofollow, noarchive, nosnippet",
+      },
     ],
     links: [
       {

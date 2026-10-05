@@ -1,3 +1,4 @@
-# https://www.robotstxt.org/robotstxt.html
+# This policy applies to the analytics host, including shared public views.
 User-agent: *
-Disallow:
+Content-Signal: search=no, ai-input=no, ai-train=no
+Disallow: /

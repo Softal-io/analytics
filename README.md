@@ -100,6 +100,21 @@ site's `LiveVisitors` Durable Object — no polling. Five-minute visitor presenc
 is persisted in its SQLite storage so the count survives idle eviction and
 WebSocket hibernation.
 
+### Search engines and AI crawlers
+
+The analytics host opts out of search indexing and AI crawling, including login,
+private dashboards, public views, and APIs. The shared HTML layout declares
+`noindex, nofollow, noarchive, nosnippet`; Worker responses and static assets also
+send the same directives in `X-Robots-Tag`. `public/robots.txt` disallows all
+crawling and sets `search=no, ai-input=no, ai-train=no` content signals.
+
+These directives rely on crawler cooperation. Public views remain accessible to
+anyone with the link. For enforced bot blocking, create a Cloudflare WAF custom
+rule scoped to `http.host eq "YOUR_ANALYTICS_HOST"`, rather than enabling a
+zone-wide setting that also affects other subdomains. Already indexed URLs may
+require removal through the search engine's webmaster tools, because a crawler
+blocked by `robots.txt` cannot fetch the page's `noindex` directive.
+
 ## API
 
 The dashboard, private API, server functions, and realtime WebSocket require
