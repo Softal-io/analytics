@@ -1,7 +1,11 @@
 import { GlobeIcon } from "@phosphor-icons/react"
 import type { SVGProps } from "react"
 
-/** Referrer domain favicon via Google's favicon cache. */
+/**
+ * Domain favicon via Google's favicon service. `domain_url` lets Google fetch
+ * icons it hasn't cached yet; `domain` returns only cached ones, so newer
+ * sites fell back to Google's default globe.
+ */
 export function SourceIcon({ domain }: { domain: string }) {
   if (
     !domain ||
@@ -14,7 +18,7 @@ export function SourceIcon({ domain }: { domain: string }) {
   }
   return (
     <img
-      src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=256`}
+      src={`https://www.google.com/s2/favicons?domain_url=${encodeURIComponent(`https://${domain}`)}&sz=256`}
       alt=""
       className="size-5 shrink-0 rounded-sm"
       loading="lazy"
