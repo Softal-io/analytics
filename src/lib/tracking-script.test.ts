@@ -187,6 +187,15 @@ function browserFixture(
       documentListeners.get("click")!({
         target: { closest: () => ({ href }) },
       }),
+    dispatchClick: (event: object) => documentListeners.get("click")!(event),
+    press: (link: object) =>
+      documentListeners.get("pointerdown")!({
+        target: { closest: () => link },
+      }),
+    clickLink: (link: object) =>
+      documentListeners.get("click")!({
+        target: { closest: () => link },
+      }),
   }
 }
 
@@ -516,5 +525,101 @@ describe("navigation and link coverage", () => {
       routed.payloads.at(-1)?.context_key
     )
     expect(routed.payloads[0].page_id).not.toBe(routed.payloads.at(-1)?.page_id)
+  })
+
+  it("names the current page on checkout links without changing the recorded destination", async () => {
+    const page = browserFixture()
+    await page.settle()
+    const wa = page.window.wa as unknown as { reference: () => string }
+    const reference = `wa.site.${page.payloads[0].page_id}`
+    expect(wa.reference()).toBe(reference)
+
+    const checkout = {
+      href: "https://buy.polar.sh/polar_cl_abc?plan=pro",
+      hasAttribute: () => false,
+    }
+    // Opening the link from a context menu never fires a click.
+    page.press(checkout)
+    expect(checkout.href).toBe(
+      `https://buy.polar.sh/polar_cl_abc?plan=pro&reference_id=${reference}`
+    )
+    page.clickLink(checkout)
+    await page.settle()
+    expect(page.payloads.at(-1)).toMatchObject({
+      kind: "outbound",
+      outbound_url: "https://buy.polar.sh/polar_cl_abc?plan=pro",
+    })
+
+    // After a route change, the same link names the new page.
+    page.history.pushState({}, "", "/pricing")
+    await page.settle()
+    const next = `wa.site.${page.payloads.at(-1)?.page_id}`
+    expect(next).not.toBe(reference)
+    page.clickLink(checkout)
+    await page.settle()
+    expect(checkout.href).toBe(
+      `https://buy.polar.sh/polar_cl_abc?plan=pro&reference_id=${next}`
+    )
+    expect(page.payloads.at(-1)?.outbound_url).toBe(
+      "https://buy.polar.sh/polar_cl_abc?plan=pro"
+    )
+
+    const optIn = {
+      href: "https://pay.vendor.example/buy",
+      hasAttribute: (name: string) => name === "data-wa-checkout",
+    }
+    page.press(optIn)
+    expect(optIn.href).toBe(
+      `https://pay.vendor.example/buy?reference_id=${next}`
+    )
+    // Ordinary links, and a reference the website set itself, are untouched.
+    const ordinary = {
+      href: "https://vendor.example/product",
+      hasAttribute: () => false,
+    }
+    const owned = {
+      href: "https://buy.polar.sh/polar_cl_abc?reference_id=order-77",
+      hasAttribute: () => false,
+    }
+    page.press(ordinary)
+    page.press(owned)
+    expect(ordinary.href).toBe("https://vendor.example/product")
+    expect(owned.href).toBe(
+      "https://buy.polar.sh/polar_cl_abc?reference_id=order-77"
+    )
+  })
+
+  it("finds links inside shadow roots and SVG, and never reports more visible time than activity", async () => {
+    const page = browserFixture()
+    await page.settle()
+    // Visible time accumulates over several heartbeats of uneven length.
+    for (const step of [15000.1, 14999.7, 15000.3]) {
+      page.advance(step)
+      page.heartbeat()
+      await page.settle()
+    }
+    for (const payload of page.payloads) {
+      expect(payload.duration_ms as number).toBeLessThanOrEqual(
+        payload.activity_ms as number
+      )
+      expect(payload.activity_ms as number).toBeLessThanOrEqual(
+        payload.elapsed_ms as number
+      )
+    }
+    const svgLink = { href: { baseVal: "https://vendor.example/svg" } }
+    page.clickLink(svgLink)
+    await page.settle()
+    expect(page.payloads.at(-1)?.outbound_url).toBe(
+      "https://vendor.example/svg"
+    )
+    const shadowLink = { href: "https://vendor.example/shadow" }
+    page.dispatchClick({
+      composedPath: () => [{ closest: () => shadowLink }],
+      target: { closest: () => null },
+    })
+    await page.settle()
+    expect(page.payloads.at(-1)?.outbound_url).toBe(
+      "https://vendor.example/shadow"
+    )
   })
 })

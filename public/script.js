@@ -2,6 +2,11 @@
  * Personal Web Analytics. Use data-site on this script; custom events use
  * window.wa.track("signup", { plan: "pro" }). Page credentials and pending
  * reports live only in memory. No cookies or browser storage are used.
+ *
+ * Checkout links (Polar, or any link with data-wa-checkout) receive a
+ * reference_id naming the current page, so a payment can be attributed to
+ * the visit. window.wa.reference() returns the same value for checkouts
+ * created on a server.
  */
 ;(function () {
   "use strict"
@@ -55,7 +60,6 @@
   }
   function payload(item) {
     var data = Object.assign({}, item.page.data, item.action)
-    data.duration_ms = item.duration
     data.elapsed_ms = Math.min(
       2 * DAY_MS,
       Math.floor(Math.max(0, performance.now() - item.page.born))
@@ -64,6 +68,9 @@
       data.elapsed_ms,
       Math.floor(Math.max(0, item.activity - item.page.born))
     )
+    // Visible time is summed in pieces and can round a millisecond past the
+    // single subtraction above. The server rejects such a report outright.
+    data.duration_ms = Math.min(item.duration, data.activity_ms)
     return JSON.stringify(data)
   }
   function enqueue(kind, action) {
@@ -270,23 +277,71 @@
     values.event_id = uuid()
     enqueue(kind, values)
   }
+  function reference() {
+    if (!page) trackPage()
+    return page ? "wa." + siteId + "." + page.data.page_id : ""
+  }
+  function ours(value) {
+    return typeof value === "string" && value.indexOf("wa.") === 0
+  }
+  /** The link an event started on, including links inside open shadow roots. */
+  function linkOf(event) {
+    var origins = [event.composedPath && event.composedPath()[0], event.target]
+    for (var i = 0; i < origins.length; i++) {
+      var node = origins[i]
+      if (node && node.nodeType === 3) node = node.parentElement
+      var link =
+        node && node.closest ? node.closest("a[href], area[href]") : null
+      if (link) return link
+    }
+    return null
+  }
+  function linkUrl(link) {
+    // An SVG link exposes its address as an animated value.
+    var href =
+      link.href && typeof link.href === "object" ? link.href.baseVal : link.href
+    return new URL(href, location.href)
+  }
+  /** Carry the current page to the payment provider, so its order can name it. */
+  function attribute(link, url) {
+    var checkout =
+      /(^|\.)polar\.sh$/.test(url.hostname) ||
+      (link.hasAttribute && link.hasAttribute("data-wa-checkout"))
+    if (!checkout || typeof link.href !== "string") return
+    var existing = url.searchParams.get("reference_id")
+    // A reference the website set for itself is left alone.
+    if (existing && !ours(existing)) return
+    var value = reference()
+    if (!value || existing === value) return
+    var decorated = new URL(url.href)
+    decorated.searchParams.set("reference_id", value)
+    link.href = decorated.href
+  }
+  function prepare(event) {
+    try {
+      var link = linkOf(event)
+      if (link) attribute(link, linkUrl(link))
+    } catch (_error) {}
+  }
   function outbound(event) {
-    var anchor =
-      event.target && event.target.closest
-        ? event.target.closest("a[href]")
-        : null
+    var anchor = linkOf(event)
     if (!anchor) return
     try {
-      var url = new URL(anchor.href, location.href)
+      var url = linkUrl(anchor)
       if (
         (url.protocol === "http:" || url.protocol === "https:") &&
         url.hostname.replace(/^www\./, "") !==
           location.hostname.replace(/^www\./, "")
       ) {
+        // Record the destination as written, without the per-page reference.
+        var recorded = new URL(url.href)
+        if (ours(recorded.searchParams.get("reference_id")))
+          recorded.searchParams.delete("reference_id")
         action("outbound", {
-          outbound_url: recordedUrl(url.href) || "(url-too-long)",
+          outbound_url: recordedUrl(recorded.href) || "(url-too-long)",
         })
         beaconPending()
+        attribute(anchor, url)
       }
     } catch (_error) {}
   }
@@ -301,6 +356,8 @@
     trackPage()
   }
   window.addEventListener("popstate", trackPage)
+  // Before the click, so "open in new tab" from a context menu is covered too.
+  document.addEventListener("pointerdown", prepare, true)
   document.addEventListener("click", outbound, true)
   document.addEventListener(
     "auxclick",
@@ -335,6 +392,7 @@
           props: props || undefined,
         })
     },
+    reference: reference,
   }
   if (
     document.readyState === "complete" ||

@@ -37,14 +37,45 @@ const metricDescriptions = {
     "Average visible, focused time per visit, including single-page visits. Historical visits retain first-to-last-pageview estimates.",
 }
 
+/** Change against the earlier period, coloured by whether it is an improvement. */
+function metricChange(
+  metric: PublicMetric,
+  value: number,
+  previous: number | undefined
+): { label: string; direction: "up" | "down" | "flat"; good: boolean } | null {
+  if (previous === undefined) return null
+  // A rate compares in percentage points; a relative change of a rate misleads.
+  const change =
+    metric === "bounceRate"
+      ? (value - previous) * 100
+      : previous > 0
+        ? ((value - previous) / previous) * 100
+        : null
+  if (change === null || !Number.isFinite(change)) return null
+  const rounded =
+    Math.abs(change) >= 10 ? Math.round(change) : Number(change.toFixed(1))
+  const direction = rounded > 0 ? "up" : rounded < 0 ? "down" : "flat"
+  return {
+    label: `${Math.abs(rounded)}${metric === "bounceRate" ? " pts" : "%"}`,
+    direction,
+    // A lower bounce rate is the improvement.
+    good: metric === "bounceRate" ? direction === "down" : direction === "up",
+  }
+}
+
 export function OverviewCard({
   summary,
+  previous,
+  comparisonLabel,
   metrics = publicMetrics,
   points,
   timezone = "UTC",
   loading = false,
 }: {
   summary: Partial<Record<PublicMetric, number>>
+  /** The same metrics for the period being compared against. */
+  previous?: Partial<Record<PublicMetric, number>>
+  comparisonLabel?: string
   metrics?: ReadonlyArray<PublicMetric>
   points?: Array<TimeseriesPoint>
   timezone?: string
@@ -60,6 +91,10 @@ export function OverviewCard({
           <div className="mb-3 grid grid-cols-2 gap-y-3 px-1 sm:flex sm:flex-wrap">
             {metrics.map((metric, index) => {
               const value = summary[metric] ?? 0
+              const change =
+                loading || !previous
+                  ? null
+                  : metricChange(metric, value, previous[metric])
               return (
                 <div
                   key={metric}
@@ -86,6 +121,36 @@ export function OverviewCard({
                           : "sm:border-l sm:px-4"
                     }`}
                   />
+                  {change && (
+                    <p
+                      title={comparisonLabel}
+                      className={`mt-0.5 text-xs font-medium tabular-nums ${
+                        index % 2 === 0 ? "" : "pl-4"
+                      } ${index === 0 ? "sm:pl-0" : "sm:pl-4"} ${
+                        change.direction === "flat"
+                          ? "text-kumo-subtle"
+                          : change.good
+                            ? "text-kumo-success"
+                            : "text-kumo-danger"
+                      }`}
+                    >
+                      <span aria-hidden="true">
+                        {change.direction === "up"
+                          ? "↑"
+                          : change.direction === "down"
+                            ? "↓"
+                            : "→"}{" "}
+                      </span>
+                      <span className="sr-only">
+                        {change.direction === "up"
+                          ? "Up "
+                          : change.direction === "down"
+                            ? "Down "
+                            : "Unchanged, "}
+                      </span>
+                      {change.label}
+                    </p>
+                  )}
                 </div>
               )
             })}

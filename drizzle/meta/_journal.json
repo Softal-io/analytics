@@ -64,6 +64,13 @@
       "when": 1791039972170,
       "tag": "0008_tearful_glorian",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1795196911455,
+      "tag": "0009_redundant_steel_serpent",
+      "breakpoints": true
     }
   ]
 }

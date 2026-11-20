@@ -66,10 +66,14 @@ export const collectRequestSchema = z
       data.duration_ms === undefined
     )
       fail("Version 2 requires a complete page snapshot.")
+    // Trackers before the clamp could report visible time one millisecond
+    // past the last activity, from summing it in pieces. Dropping the whole
+    // report over that would lose its pageview, click, or event.
+    const rounding = 1
     if (
-      (data.duration_ms ?? 0) > (data.elapsed_ms ?? 0) ||
+      (data.duration_ms ?? 0) > (data.elapsed_ms ?? 0) + rounding ||
       (data.activity_ms ?? 0) > (data.elapsed_ms ?? 0) ||
-      (data.duration_ms ?? 0) > (data.activity_ms ?? 0)
+      (data.duration_ms ?? 0) > (data.activity_ms ?? 0) + rounding
     )
       fail("Activity cannot exceed the page's elapsed lifetime.")
     if (Boolean(data.previous_page_id) !== Boolean(data.previous_page_key))

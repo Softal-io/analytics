@@ -1,7 +1,9 @@
 import { and, eq, gte, lt, or, sql } from "drizzle-orm"
 import { alias } from "drizzle-orm/sqlite-core"
 import { rawTimeFilter } from "./reporting-slices"
+import { visitRowsFilter, visitsFilter } from "./visit-filters"
 import type { ReportingSlices } from "./reporting-slices"
+import type { VisitFilters } from "./visit-filter-schema"
 import { db } from "@/db"
 import { pages, visits } from "@/db/schema"
 
@@ -26,7 +28,8 @@ export async function computeRawStats(
 
 export async function computeRawStatsForSlices(
   siteId: string,
-  slices: Pick<ReportingSlices, "raw">
+  slices: Pick<ReportingSlices, "raw">,
+  filters?: VisitFilters
 ): Promise<RawDayStats> {
   const activity = alias(visits, "activity")
   const visitorCount = db
@@ -42,7 +45,8 @@ export async function computeRawStatsForSlices(
               gte(activity.endedAt, window.startSec)
             )
           )
-        ) ?? sql`0`
+        ) ?? sql`0`,
+        visitsFilter(siteId, filters, "activity")
       )
     )
   // Independent queries — fire together. Each D1 round-trip has real
@@ -58,14 +62,22 @@ export async function computeRawStatsForSlices(
       })
       .from(visits)
       .where(
-        and(eq(visits.siteId, siteId), rawTimeFilter(visits.startedAt, slices))
+        and(
+          eq(visits.siteId, siteId),
+          rawTimeFilter(visits.startedAt, slices),
+          visitsFilter(siteId, filters)
+        )
       )
       .get(),
     db
       .select({ pageviews: sql<number>`COUNT(*)` })
       .from(pages)
       .where(
-        and(eq(pages.siteId, siteId), rawTimeFilter(pages.timestamp, slices))
+        and(
+          eq(pages.siteId, siteId),
+          rawTimeFilter(pages.timestamp, slices),
+          visitRowsFilter(siteId, filters, "pages")
+        )
       )
       .get(),
   ])

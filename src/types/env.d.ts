@@ -19,6 +19,12 @@ interface __AnalyticsSecrets {
    * absence of a token is never treated as "no auth required".
    */
   ANALYTICS_API_TOKEN?: string
+  /**
+   * Signing secret of the Polar webhook endpoint (`whsec_...`). Several
+   * secrets may be separated by commas. When unset, `/api/webhooks/polar`
+   * returns 503 and records nothing.
+   */
+  POLAR_WEBHOOK_SECRET?: string
 }
 
 declare namespace Cloudflare {

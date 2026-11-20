@@ -2,8 +2,8 @@ import { env } from "cloudflare:workers"
 import { asc, eq } from "drizzle-orm"
 import { db } from "@/db"
 import { sites } from "@/db/schema"
-import { resolveSiteAndRange } from "@/lib/api-context"
-import { computeSummary } from "@/lib/summary"
+import { resolveReport } from "@/lib/api-context"
+import { computePreviousSummary, computeSummary } from "@/lib/summary"
 import { computeTimeseries } from "@/lib/timeseries"
 import {
   computeTopDevices,
@@ -210,18 +210,30 @@ export async function handleExternalApi(
     return json({ count })
   }
 
-  const ctx = await resolveSiteAndRange(request, siteId)
-  if (!ctx) return json({ error: "Site not found" }, 404)
+  // Reports accept the dashboard's visit filters and `?limit=`.
+  const ctx = await resolveReport(request, siteId)
+  if (ctx instanceof Response) return json(await ctx.json(), ctx.status)
+  const { site, resolved, filters, limit } = ctx
 
   switch (resource) {
     case "summary": {
-      const summary = await computeSummary(ctx.site, ctx.resolved)
-      return json({ range: ctx.resolved, ...summary })
+      const [summary, previous] = await Promise.all([
+        computeSummary(site, resolved, undefined, filters),
+        url.searchParams.get("compare") === "previous"
+          ? computePreviousSummary(site, resolved, filters)
+          : undefined,
+      ])
+      return json({ range: resolved, ...summary, previous })
     }
 
     case "timeseries": {
-      const points = await computeTimeseries(ctx.site, ctx.resolved)
-      return json({ range: ctx.resolved, points })
+      const points = await computeTimeseries(
+        site,
+        resolved,
+        undefined,
+        filters
+      )
+      return json({ range: resolved, points })
     }
 
     case "pages": {
@@ -230,8 +242,15 @@ export async function handleExternalApi(
         ["top", "entered", "exited"],
         "top",
       )
-      const result = await computeTopPages(ctx.site, ctx.resolved, view)
-      return json({ range: ctx.resolved, view, ...result })
+      const result = await computeTopPages(
+        site,
+        resolved,
+        view,
+        limit,
+        undefined,
+        filters
+      )
+      return json({ range: resolved, view, ...result })
     }
 
     case "sources": {
@@ -240,8 +259,15 @@ export async function handleExternalApi(
         ["referrer", "links", "utm"],
         "referrer",
       )
-      const result = await computeTopSources(ctx.site, ctx.resolved, view)
-      return json({ range: ctx.resolved, view, ...result })
+      const result = await computeTopSources(
+        site,
+        resolved,
+        view,
+        limit,
+        undefined,
+        filters
+      )
+      return json({ range: resolved, view, ...result })
     }
 
     case "devices": {
@@ -250,8 +276,15 @@ export async function handleExternalApi(
         ["browser", "os", "device"],
         "browser",
       )
-      const result = await computeTopDevices(ctx.site, ctx.resolved, view)
-      return json({ range: ctx.resolved, view, ...result })
+      const result = await computeTopDevices(
+        site,
+        resolved,
+        view,
+        limit,
+        undefined,
+        filters
+      )
+      return json({ range: resolved, view, ...result })
     }
 
     case "locations": {
@@ -260,13 +293,26 @@ export async function handleExternalApi(
         ["country", "region", "city"],
         "country",
       )
-      const result = await computeTopLocations(ctx.site, ctx.resolved, view)
-      return json({ range: ctx.resolved, view, ...result })
+      const result = await computeTopLocations(
+        site,
+        resolved,
+        view,
+        limit,
+        undefined,
+        filters
+      )
+      return json({ range: resolved, view, ...result })
     }
 
     case "activity": {
-      const rows = await computeTopEvents(ctx.site, ctx.resolved)
-      return json({ range: ctx.resolved, rows })
+      const rows = await computeTopEvents(
+        site,
+        resolved,
+        limit,
+        undefined,
+        filters
+      )
+      return json({ range: resolved, rows })
     }
 
     default:

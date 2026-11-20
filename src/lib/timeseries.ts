@@ -1,11 +1,14 @@
 import { and, eq, sql } from "drizzle-orm"
-import { cachedDateFilter, getReportingSlices } from "./reporting-slices"
+import { cachedDateFilter, reportSlices } from "./reporting-slices"
+import { hasVisitFilters } from "./visit-filter-schema"
+import { visitRowsFilter, visitsFilter } from "./visit-filters"
 import type { ReportingSlices } from "./reporting-slices"
+import type { VisitFilters } from "./visit-filter-schema"
 import type { Site } from "@/db/schema"
 import type { ResolvedRange } from "@/lib/dates"
 import { db } from "@/db"
 import { dailySummary } from "@/db/schema"
-import { startOfDayUtcMs } from "@/lib/dates"
+import { shiftDate, startOfDayUtcMs } from "@/lib/dates"
 
 export interface TimeseriesPoint {
   /** UTC epoch ms, including distinct instants for repeated local hours. */
@@ -22,12 +25,18 @@ interface Bucket {
  * Range joins use the page-time and visit-activity indexes. A visit spanning
  * midnight contributes a visitor to each day, but remains one visit.
  */
-async function rawBuckets(siteId: string, buckets: Array<Bucket>) {
+async function rawBuckets(
+  siteId: string,
+  buckets: Array<Bucket>,
+  filters?: VisitFilters
+) {
   if (!buckets.length)
     return {
       pages: new Map<number, number>(),
       visitors: new Map<number, number>(),
     }
+  const pageFilter = visitRowsFilter(siteId, filters, "p") ?? sql`1`
+  const visitFilter = visitsFilter(siteId, filters, "v") ?? sql`1`
   const boundaries = JSON.stringify(
     buckets.map(({ startSec, endSec }, index) => [
       startSec,
@@ -44,16 +53,19 @@ async function rawBuckets(siteId: string, buckets: Array<Bucket>) {
     db.all<{ bucket: number; count: number }>(sql`${bucketTable}
       SELECT b.start_sec AS bucket, COUNT(*) AS count FROM buckets b
       JOIN pages p ON p.site_id = ${siteId} AND p.timestamp >= b.start_sec AND p.timestamp < b.end_sec
+      WHERE ${pageFilter}
       GROUP BY b.start_sec`),
     db.all<{ bucket: number; count: number }>(sql`${bucketTable},
       activity(visitor_id, ended_at, ordinal) AS (
         SELECT v.visitor_id, v.ended_at, b.ordinal FROM buckets b
         CROSS JOIN visits v INDEXED BY idx_visits_site_started_visitor
           WHERE v.site_id = ${siteId} AND v.started_at >= b.start_sec AND v.started_at < b.end_sec
+            AND ${visitFilter}
         UNION
         SELECT v.visitor_id, v.ended_at, b.ordinal FROM buckets b
         CROSS JOIN visits v INDEXED BY idx_visits_site_ended_started_visitor
           WHERE b.first_in_window = 1 AND v.site_id = ${siteId} AND v.ended_at >= b.start_sec AND v.started_at < b.start_sec
+            AND ${visitFilter}
         UNION
         SELECT a.visitor_id, a.ended_at, next.ordinal FROM activity a
         JOIN buckets current ON current.ordinal = a.ordinal
@@ -76,15 +88,22 @@ async function rawBuckets(siteId: string, buckets: Array<Bucket>) {
 export async function computeTimeseries(
   site: Site,
   resolved: ResolvedRange,
-  reporting?: ReportingSlices
+  reporting?: ReportingSlices,
+  filters?: VisitFilters
 ): Promise<Array<TimeseriesPoint>> {
+  // Today and yesterday are single days worth reading hour by hour.
   if (
-    resolved.fromDate === resolved.today &&
-    resolved.toDate === resolved.today
+    resolved.fromDate === resolved.toDate &&
+    resolved.fromDate >= shiftDate(resolved.today, -1)
   )
-    return computeHourlyPoints(site, resolved.today)
+    return computeHourlyPoints(site, resolved.fromDate, filters)
 
-  const slices = reporting ?? (await getReportingSlices(site, resolved))
+  const slices = await reportSlices(
+    site,
+    resolved,
+    reporting,
+    hasVisitFilters(filters)
+  )
   const [cached, raw] = await Promise.all([
     slices.cached.length
       ? db
@@ -99,7 +118,8 @@ export async function computeTimeseries(
       : Promise.resolve([]),
     rawBuckets(
       site.id,
-      slices.days.filter((day) => !day.cached)
+      slices.days.filter((day) => !day.cached),
+      filters
     ),
   ])
   const byDate = new Map(cached.map((row) => [row.date, row]))
@@ -116,21 +136,18 @@ export async function computeTimeseries(
 
 async function computeHourlyPoints(
   site: Site,
-  today: string
+  date: string,
+  filters?: VisitFilters
 ): Promise<Array<TimeseriesPoint>> {
-  const next = new Date(`${today}T00:00:00Z`)
-  next.setUTCDate(next.getUTCDate() + 1)
-  const start = Math.floor(startOfDayUtcMs(today, site.timezone) / 1000)
+  const start = Math.floor(startOfDayUtcMs(date, site.timezone) / 1000)
   const end = Math.min(
     Math.floor(Date.now() / 1000) + 1,
-    Math.floor(
-      startOfDayUtcMs(next.toISOString().slice(0, 10), site.timezone) / 1000
-    )
+    Math.floor(startOfDayUtcMs(shiftDate(date, 1), site.timezone) / 1000)
   )
   const buckets: Array<Bucket> = []
   for (let instant = start; instant < end; instant += 3600)
     buckets.push({ startSec: instant, endSec: Math.min(instant + 3600, end) })
-  const raw = await rawBuckets(site.id, buckets)
+  const raw = await rawBuckets(site.id, buckets, filters)
   return buckets.map((bucket) => ({
     timestamp: bucket.startSec * 1000,
     pageviews: raw.pages.get(bucket.startSec) ?? 0,

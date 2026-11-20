@@ -19,6 +19,11 @@ export async function authorizeRequest(
     return Response.json({ error: "Invalid URL path" }, { status: 400 })
   }
   if (pathname === "/collect" || pathname === "/script.js") return null
+  // Payment providers authenticate with a signature, checked by the route.
+  if (pathname === "/api/webhooks/polar")
+    return request.method === "POST"
+      ? null
+      : new Response(null, { status: 405 })
   if (pathname.startsWith("/api/auth/")) return null
   const writing = !["GET", "HEAD", "OPTIONS"].includes(request.method)
   if (writing || request.headers.get("Upgrade") === "websocket") {

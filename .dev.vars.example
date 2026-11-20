@@ -14,3 +14,7 @@ GOOGLE_CLIENT_SECRET="your-client-secret"
 # fails closed with 503 rather than serving unauthenticated requests.
 # Generate one with: openssl rand -hex 32
 # ANALYTICS_API_TOKEN="..."
+
+# Signing secret of the Polar webhook endpoint that posts to
+# /api/webhooks/polar. Leave unset to keep payment tracking switched off.
+# POLAR_WEBHOOK_SECRET="whsec_..."

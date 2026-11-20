@@ -5,7 +5,8 @@
  * resolved with Intl, including offset changes around midnight.
  */
 
-export type RangeKey = "today" | "7d" | "30d" | "6m" | "1y" | "custom"
+export type RangeKey =
+  "today" | "yesterday" | "7d" | "30d" | "6m" | "1y" | "custom"
 
 export function isValidTimezone(timezone: string): boolean {
   try {
@@ -19,6 +20,7 @@ export function isValidTimezone(timezone: string): boolean {
 export function isRangeKey(value: string | null): value is RangeKey {
   return (
     value === "today" ||
+    value === "yesterday" ||
     value === "7d" ||
     value === "30d" ||
     value === "6m" ||
@@ -138,11 +140,24 @@ export interface ResolvedRange {
   today: string
 }
 
-const RANGE_DAYS: Record<Exclude<RangeKey, "custom" | "today">, number> = {
+const RANGE_DAYS: Record<
+  Exclude<RangeKey, "custom" | "today" | "yesterday">,
+  number
+> = {
   "7d": 6,
   "30d": 29,
   "6m": 182,
   "1y": 364,
+}
+
+const MAX_CUSTOM_RANGE_DAYS = 1100
+
+function isCalendarDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const time = Date.parse(`${value}T00:00:00Z`)
+  return (
+    Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === value
+  )
 }
 
 export function resolveRange(
@@ -154,8 +169,21 @@ export function resolveRange(
   const today = todayInTz(timezone)
 
   if (range === "custom") {
-    if (customFrom && customTo) {
-      return { fromDate: customFrom, toDate: customTo, today }
+    // Unchecked dates could request an unbounded number of days.
+    if (
+      customFrom &&
+      customTo &&
+      isCalendarDate(customFrom) &&
+      isCalendarDate(customTo) &&
+      customFrom <= customTo &&
+      customFrom <= today &&
+      customTo <= shiftDate(customFrom, MAX_CUSTOM_RANGE_DAYS - 1)
+    ) {
+      return {
+        fromDate: customFrom,
+        toDate: customTo < today ? customTo : today,
+        today,
+      }
     }
     return { fromDate: today, toDate: today, today }
   }
@@ -164,8 +192,56 @@ export function resolveRange(
     return { fromDate: today, toDate: today, today }
   }
 
-  const days = RANGE_DAYS[range]
-  const d = new Date(`${today}T00:00:00Z`)
-  d.setUTCDate(d.getUTCDate() - days)
-  return { fromDate: d.toISOString().slice(0, 10), toDate: today, today }
+  if (range === "yesterday") {
+    const yesterday = shiftDate(today, -1)
+    return { fromDate: yesterday, toDate: yesterday, today }
+  }
+
+  return {
+    fromDate: shiftDate(today, -RANGE_DAYS[range]),
+    toDate: today,
+    today,
+  }
+}
+
+/** Moves a `YYYY-MM-DD` calendar date by whole days. */
+export function shiftDate(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + days)
+  return d.toISOString().slice(0, 10)
+}
+
+export interface ComparisonRange {
+  resolved: ResolvedRange
+  /**
+   * Exclusive end of the comparison, when the selected range is still in
+   * progress. The earlier period then stops at the same point in its last day.
+   */
+  untilSec?: number
+}
+
+/**
+ * The equally long period immediately before `range`. A range that includes
+ * today is compared to date: today so far against yesterday up to the same
+ * time, and the last 7 days against the 7 before them up to the same time.
+ */
+export function previousRange(
+  range: ResolvedRange,
+  timezone: string,
+  nowMs = Date.now()
+): ComparisonRange {
+  const days = dateRangeList(range.fromDate, range.toDate).length
+  const resolved = {
+    fromDate: shiftDate(range.fromDate, -days),
+    toDate: shiftDate(range.toDate, -days),
+    today: range.today,
+  }
+  if (range.toDate < range.today) return { resolved }
+  const elapsedMs = Math.max(0, nowMs - startOfDayUtcMs(range.today, timezone))
+  const lastDayStart = startOfDayUtcMs(resolved.toDate, timezone)
+  const lastDayEnd = startOfDayUtcMs(shiftDate(resolved.toDate, 1), timezone)
+  return {
+    resolved,
+    untilSec: Math.floor(Math.min(lastDayEnd, lastDayStart + elapsedMs) / 1000),
+  }
 }

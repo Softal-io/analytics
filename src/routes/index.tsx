@@ -15,6 +15,8 @@ import { createFileRoute, useNavigate, useRouter } from "@tanstack/react-router"
 import { createServerFn } from "@tanstack/react-start"
 import { useEffect, useRef, useState } from "react"
 import { z } from "zod"
+import type { PaymentsResult } from "@/lib/payments"
+import type { VisitFilterKey, VisitFilters } from "@/lib/visit-filter-schema"
 import type {
   DeviceDimension,
   LocationDimension,
@@ -33,6 +35,8 @@ import { InstallScriptDialog } from "@/components/dashboard/install-script-dialo
 import { PublicViewDialog } from "@/components/dashboard/public-view-dialog"
 import { authClient } from "@/lib/auth-client"
 import { CardHeader } from "@/components/dashboard/card-header"
+import { FilterBar } from "@/components/dashboard/filter-bar"
+import { PaymentsCard } from "@/components/dashboard/payments-card"
 import {
   BrowserMark,
   DeviceMark,
@@ -45,6 +49,12 @@ import { useAnalyticsData } from "@/hooks/use-analytics-data"
 import { useLiveVisitors } from "@/hooks/use-live-visitors"
 import { useSourceDetails } from "@/hooks/use-source-details"
 import { externalUrl, pageUrl } from "@/lib/dashboard-links"
+import { formatDeviceType } from "@/lib/format"
+import {
+  visitFilterKeys,
+  visitFilterQuery,
+  visitFiltersSchema,
+} from "@/lib/visit-filter-schema"
 import {
   SourceDetailsContent,
   sourceHref,
@@ -56,19 +66,23 @@ const getDashboardData = createServerFn().handler(async () => {
   return await loadDashboardData()
 })
 
-type UiRangeKey = "today" | "7d" | "30d" | "6m" | "1y"
+type UiRangeKey = "today" | "yesterday" | "7d" | "30d" | "6m" | "1y"
+
+/** Rows requested per list. Lists scroll, so the tail stays reachable. */
+const LIST_ROWS = 100
 
 const RANGE_OPTIONS: Array<{ value: UiRangeKey; label: string }> = [
   { value: "today", label: "Today" },
+  { value: "yesterday", label: "Yesterday" },
   { value: "7d", label: "Last 7 days" },
   { value: "30d", label: "Last 30 days" },
   { value: "6m", label: "Last 6 months" },
   { value: "1y", label: "Last 12 months" },
 ]
 
-const searchSchema = z.object({
+const baseSearchSchema = z.object({
   site: z.string().optional(),
-  range: z.enum(["today", "7d", "30d", "6m", "1y"]).optional(),
+  range: z.enum(["today", "yesterday", "7d", "30d", "6m", "1y"]).optional(),
   simulateLocations: z
     .union([
       z.boolean(),
@@ -77,18 +91,63 @@ const searchSchema = z.object({
     .optional(),
 })
 
+/**
+ * Filters live in the URL, so a filtered view can be bookmarked and the back
+ * button undoes a click. The router decodes values as JSON (`paid=1` arrives
+ * as a number), so each is turned back into the text the reports expect. An
+ * unusable filter is dropped rather than breaking the page.
+ */
+function validateSearch(search: Record<string, unknown>) {
+  const filters: Record<string, string> = {}
+  for (const key of visitFilterKeys) {
+    const value = search[key]
+    if (value === undefined || value === null || value === "") continue
+    const text =
+      typeof value === "object" ? JSON.stringify(value) : String(value)
+    if (visitFiltersSchema.shape[key].safeParse(text).success)
+      filters[key] = text
+  }
+  return {
+    ...baseSearchSchema.parse(search),
+    ...(filters as VisitFilters),
+  }
+}
+
 export const Route = createFileRoute("/")({
-  validateSearch: searchSchema,
+  validateSearch,
   loader: () => getDashboardData(),
   component: App,
 })
 
-interface SummaryResponse {
+interface SummaryMetrics {
   visitors: number
   visits: number
   pageviews: number
   bounceRate: number
   avgDurationSeconds: number
+}
+
+interface SummaryResponse extends SummaryMetrics {
+  previous?: SummaryMetrics & {
+    range: { fromDate: string; toDate: string }
+    untilSec?: number
+  }
+}
+
+function comparisonLabel(previous: NonNullable<SummaryResponse["previous"]>) {
+  const day = (date: string) =>
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "UTC",
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    }).format(new Date(`${date}T00:00:00Z`))
+  const { fromDate, toDate } = previous.range
+  const period =
+    fromDate === toDate ? day(fromDate) : `${day(fromDate)} to ${day(toDate)}`
+  return `Compared with ${period}${
+    previous.untilSec === undefined ? "" : ", up to the same time of day"
+  }`
 }
 
 interface TimeseriesPoint {
@@ -108,14 +167,15 @@ interface TopListResponse<TRow> {
 
 function useTopList<TRow>(
   siteId: string | undefined,
-  range: UiRangeKey,
+  /** Range and filters, shared by every report on the page. */
+  query: string,
   resource: "pages" | "sources" | "devices" | "locations",
   view: string,
   animateViewChange: boolean
 ): TopListResponse<TRow> {
   const request = useAnalyticsData<{ rows: Array<TRow>; total: number }>(
     siteId
-      ? `/api/sites/${siteId}/${resource}?range=${range}&view=${view}`
+      ? `/api/sites/${siteId}/${resource}?${query}&view=${view}&limit=${LIST_ROWS}`
       : undefined
   )
   const resolvedViewRef = useRef<string | null>(null)
@@ -206,18 +266,24 @@ function App() {
       ? search.site
       : allSites[0]?.id
   const range = search.range ?? "30d"
+  // Validated on the way in; this only separates filters from site and range.
+  const filters: VisitFilters = visitFiltersSchema.parse(search)
+  const query = `range=${range}${visitFilterQuery(filters)}`
 
   const base = selectedSiteId ? `/api/sites/${selectedSiteId}` : undefined
   const summaryRequest = useAnalyticsData<SummaryResponse>(
-    base ? `${base}/summary?range=${range}` : undefined
+    base ? `${base}/summary?${query}&compare=previous` : undefined
   )
   const pointsRequest = useAnalyticsData<{ points: Array<TimeseriesPoint> }>(
-    base ? `${base}/timeseries?range=${range}` : undefined
+    base ? `${base}/timeseries?${query}` : undefined
   )
   const eventsRequest = useAnalyticsData<{
     rows: Array<TopEventRow>
     total: number
-  }>(base ? `${base}/activity?range=${range}` : undefined)
+  }>(base ? `${base}/activity?${query}&limit=${LIST_ROWS}` : undefined)
+  const paymentsRequest = useAnalyticsData<PaymentsResult>(
+    base ? `${base}/payments?${query}` : undefined
+  )
   const summary = summaryRequest.data
   const points = pointsRequest.data?.points ?? []
   const eventRows = eventsRequest.data?.rows ?? []
@@ -245,35 +311,35 @@ function App() {
   )
   const pageList = useTopList<TopPageRow>(
     selectedSiteId,
-    range,
+    query,
     "pages",
     pageDimension,
     animatePageFilterRef.current
   )
   const sourceList = useTopList<TopSourceRow>(
     selectedSiteId,
-    range,
+    query,
     "sources",
     sourceDimension,
     animateSourceFilterRef.current
   )
   const outboundList = useTopList<TopSourceRow>(
     selectedSiteId,
-    range,
+    query,
     "sources",
     "links",
     false
   )
   const deviceList = useTopList<TopDeviceRow>(
     selectedSiteId,
-    range,
+    query,
     "devices",
     deviceDimension,
     animateDeviceFilterRef.current
   )
   const locationList = useTopList<TopLocationRow>(
     selectedSiteId,
-    range,
+    query,
     "locations",
     locationDimension,
     animateLocationFilterRef.current
@@ -284,6 +350,24 @@ function App() {
   }
   function selectRange(value: UiRangeKey) {
     navigate({ to: "/", search: (prev) => ({ ...prev, range: value }) })
+  }
+  /** Applies the given filters; an undefined value removes that filter. */
+  function setFilters(changes: Partial<Record<VisitFilterKey, string>>) {
+    navigate({
+      to: "/",
+      search: (prev) => ({ ...prev, ...changes }) as typeof prev,
+    })
+  }
+  /** Clicking a row filters to it; clicking the active row clears it. */
+  function rowFilter(key: VisitFilterKey, value: string) {
+    const selected = filters[key] === value
+    return {
+      selected,
+      onSelect: () => setFilters({ [key]: selected ? undefined : value }),
+    }
+  }
+  function clearFilters() {
+    setFilters(Object.fromEntries(visitFilterKeys.map((key) => [key])))
   }
   async function handleSiteCreated(id: string) {
     await router.invalidate()
@@ -486,9 +570,23 @@ function App() {
           </Button>
         </div>
       )}
+      <FilterBar
+        filters={filters}
+        onRemove={(key) => setFilters({ [key]: undefined })}
+        onClear={clearFilters}
+      />
       <OverviewCard
         timezone={selectedSite.timezone}
         summary={summary ?? {}}
+        previous={
+          summary?.previous &&
+          summary.previous.visits + summary.previous.pageviews > 0
+            ? summary.previous
+            : undefined
+        }
+        comparisonLabel={
+          summary?.previous ? comparisonLabel(summary.previous) : undefined
+        }
         metrics={summaryRequest.error ? [] : undefined}
         points={points}
         loading={loading && points.length === 0}
@@ -521,6 +619,14 @@ function App() {
                 label: r.path,
                 href: pageUrl(selectedSite.domain, r.path),
                 value: r.count,
+                ...rowFilter(
+                  pageDimension === "entered"
+                    ? "entry"
+                    : pageDimension === "exited"
+                      ? "exit"
+                      : "page",
+                  r.path
+                ),
               }))}
               metricLabel={pageDimension === "top" ? "Pageviews" : "Visits"}
               total={pageList.total}
@@ -544,6 +650,7 @@ function App() {
                   <SourceIcon domain={r.referrerDomain} />
                 ) : undefined,
                 value: r.visits,
+                ...rowFilter("link", r.key),
               }))}
               metricLabel="Clicks"
               total={outboundList.total}
@@ -599,6 +706,7 @@ function App() {
                     <SourceIcon domain={r.referrerDomain} />
                   ) : undefined,
                   value: r.visits,
+                  ...rowFilter(view === "utm" ? "utm" : "referrer", r.key),
                 }
               })}
               metricLabel="Visits"
@@ -647,7 +755,7 @@ function App() {
                 key: r.value,
                 label:
                   deviceDimension === "device"
-                    ? `${r.value.charAt(0).toUpperCase()}${r.value.slice(1)}`
+                    ? formatDeviceType(r.value)
                     : r.value,
                 icon:
                   deviceDimension === "browser" ? (
@@ -658,6 +766,7 @@ function App() {
                     <DeviceMark device={r.value} />
                   ),
                 value: r.visits,
+                ...rowFilter(deviceDimension, r.value),
               }))}
               metricLabel="Visits"
               total={deviceList.total}
@@ -687,12 +796,35 @@ function App() {
               loading={locationList.loading}
               error={locationList.error}
               onRetry={locationList.retry}
-              items={locationList.rows.map((r) => ({
-                key: `${r.country}-${r.region}-${r.city}`,
-                label: locationLabel(r, locationDimension),
-                icon: <CountryFlag country={r.country} />,
-                value: r.visits,
-              }))}
+              items={locationList.rows.map((r) => {
+                // A place is one filter: its country plus its region or city.
+                const place = {
+                  country: r.country,
+                  region: r.region || undefined,
+                  city: r.city || undefined,
+                }
+                const selected =
+                  filters.country === place.country &&
+                  filters.region === place.region &&
+                  filters.city === place.city
+                return {
+                  key: `${r.country}-${r.region}-${r.city}`,
+                  label: locationLabel(r, locationDimension),
+                  icon: <CountryFlag country={r.country} />,
+                  value: r.visits,
+                  selected,
+                  onSelect: () =>
+                    setFilters(
+                      selected
+                        ? {
+                            country: undefined,
+                            region: undefined,
+                            city: undefined,
+                          }
+                        : place
+                    ),
+                }
+              })}
               metricLabel="Visits"
               total={locationList.total}
               animateItems={locationList.animateItems}
@@ -722,6 +854,7 @@ function App() {
                 key: r.name,
                 label: r.name,
                 value: r.count,
+                ...rowFilter("event", r.name),
               }))}
               metricLabel="Events"
               total={eventTotal}
@@ -729,6 +862,22 @@ function App() {
             />
           </LayerCard.Primary>
         </LayerCard>
+
+        <PaymentsCard
+          totals={paymentsRequest.data?.totals ?? []}
+          payments={paymentsRequest.data?.payments ?? 0}
+          paidVisits={paymentsRequest.data?.paidVisits ?? 0}
+          visits={summary?.visits}
+          rows={paymentsRequest.data?.rows ?? []}
+          timezone={selectedSite.timezone}
+          loading={paymentsRequest.loading}
+          error={paymentsRequest.error}
+          onRetry={paymentsRequest.retry}
+          paidOnly={filters.paid === "1"}
+          onPaidOnlyChange={(value) =>
+            setFilters({ paid: value ? "1" : undefined })
+          }
+        />
       </div>
     </div>
   )

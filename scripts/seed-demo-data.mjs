@@ -325,6 +325,7 @@ function locationIdSubquery(loc) {
 // location lookup rows are intentionally retained because other sites may use
 // them; sources are site-specific and can be safely replaced.
 const cleanupStatements = [
+  `DELETE FROM payments WHERE site_id = ${esc(siteId)};`,
   `DELETE FROM daily_events WHERE site_id = ${esc(siteId)};`,
   `DELETE FROM daily_outbound_links WHERE site_id = ${esc(siteId)};`,
   `DELETE FROM daily_locations WHERE site_id = ${esc(siteId)};`,
@@ -432,13 +433,15 @@ for (let offset = days - 1; offset >= 0; offset--) {
       `INSERT INTO visits (id, site_id, visitor_id, started_at, ended_at, duration_ms, entry_page, exit_page, page_count, is_bounce, source_id, device_id, location_id, referrer_url, landing_url) VALUES (${esc(visitId)}, ${esc(siteId)}, ${esc(visitorId)}, ${startedAt}, ${endedAt}, ${durationMs}, ${esc(visitedPaths[0].path)}, ${esc(visitedPaths.at(-1).path)}, ${pageCount}, ${bounce ? 1 : 0}, ${sourceIdSubquery(referrer)}, ${deviceIdSubquery(device)}, ${locationIdSubquery(location)}, ${esc(referringUrl)}, ${landingUrl});`
     )
     let interaction = false
+    let lastPageId = ""
     visitedPaths.forEach((pg, index) => {
+      lastPageId = randomUUID()
       const timestamp = startedAt + Math.floor((duration * index) / pageCount)
       const pageDuration =
         Math.floor((durationMs * (index + 1)) / pageCount) -
         Math.floor((durationMs * index) / pageCount)
       statements.push(
-        `INSERT INTO pages (site_id, visit_id, path, title, timestamp, timestamp_ms, duration_ms, tracking_id) VALUES (${esc(siteId)}, ${esc(visitId)}, ${esc(pg.path)}, ${esc(pg.title)}, ${timestamp}, ${timestamp * 1000}, ${pageDuration}, ${esc(randomUUID())});`
+        `INSERT INTO pages (site_id, visit_id, path, title, timestamp, timestamp_ms, duration_ms, tracking_id) VALUES (${esc(siteId)}, ${esc(visitId)}, ${esc(pg.path)}, ${esc(pg.title)}, ${timestamp}, ${timestamp * 1000}, ${pageDuration}, ${esc(lastPageId)});`
       )
       for (const rule of EVENT_RULES) {
         if (rule.pages.includes(pg.path) && Math.random() < rule.chance) {
@@ -454,6 +457,17 @@ for (let offset = days - 1; offset >= 0; offset--) {
       const link = weightedPick(OUTBOUND_LINKS)
       statements.push(
         `INSERT INTO outbound_links (site_id, visitor_id, url, timestamp) VALUES (${esc(siteId)}, ${esc(visitorId)}, ${esc(link.url)}, ${endedAt});`
+      )
+    }
+    // A few visits end in a purchase, attributed through the page they left from.
+    if (Math.random() < 0.04) {
+      interaction = true
+      const plan = pick([
+        { product: "Pro licence", amount: 4900 },
+        { product: "Team licence", amount: 14900 },
+      ])
+      statements.push(
+        `INSERT INTO payments (site_id, provider, order_id, page_id, reference, amount, refunded_amount, currency, status, product, billing_reason, paid_at, updated_at) VALUES (${esc(siteId)}, 'polar', ${esc(`demo_${randomUUID()}`)}, (SELECT id FROM pages WHERE site_id = ${esc(siteId)} AND tracking_id = ${esc(lastPageId)}), ${esc(`wa.${siteId}.${lastPageId}`)}, ${plan.amount}, 0, 'usd', 'paid', ${esc(plan.product)}, 'purchase', ${endedAt}, ${endedAt});`
       )
     }
     if (interaction && bounce)

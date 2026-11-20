@@ -12,6 +12,9 @@ export interface RankedListItem {
   href?: string
   details?: ReactNode
   onDetailsOpen?: () => void
+  /** Filters the dashboard to this row. Selecting it again removes the filter. */
+  onSelect?: () => void
+  selected?: boolean
 }
 
 interface RankedListProps {
@@ -119,7 +122,7 @@ export function RankedList({
                 key={item.key}
                 className={`group/row relative flex h-7 shrink-0 items-center gap-2 rounded-md px-2 text-sm text-kumo-subtle ${
                   animateItems ? "ranked-list-filter-enter" : ""
-                }`}
+                } ${item.selected ? "ring-1 ring-kumo-brand ring-inset" : ""}`}
                 style={
                   animateItems
                     ? { animationDelay: `${index * 30}ms` }
@@ -144,7 +147,13 @@ export function RankedList({
                         openOnHover
                         delay={350}
                         closeDelay={150}
-                        className="min-w-0 cursor-default truncate text-left tracking-wide focus-visible:outline-2 focus-visible:outline-offset-2"
+                        aria-pressed={item.onSelect ? item.selected : undefined}
+                        onClick={item.onSelect}
+                        className={`min-w-0 truncate text-left tracking-wide focus-visible:outline-2 focus-visible:outline-offset-2 ${
+                          item.onSelect
+                            ? "cursor-pointer hover:text-kumo-default"
+                            : "cursor-default"
+                        }`}
                       >
                         {item.label}
                       </Popover.Trigger>
@@ -160,6 +169,20 @@ export function RankedList({
                         {item.details}
                       </Popover.Content>
                     </Popover>
+                  ) : item.onSelect ? (
+                    <button
+                      type="button"
+                      aria-pressed={item.selected}
+                      title={
+                        item.selected
+                          ? "Remove this filter"
+                          : "Filter the dashboard to this"
+                      }
+                      onClick={item.onSelect}
+                      className="min-w-0 cursor-pointer truncate text-left tracking-wide hover:text-kumo-default focus-visible:outline-2 focus-visible:outline-offset-2"
+                    >
+                      {item.label}
+                    </button>
                   ) : (
                     <span className="truncate tracking-wide">{item.label}</span>
                   )}

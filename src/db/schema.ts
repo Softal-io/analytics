@@ -405,9 +405,59 @@ export const events = sqliteTable(
   (t) => [
     index("idx_events_site_name_ts").on(t.siteId, t.name, t.timestamp),
     index("idx_events_site_ts").on(t.siteId, t.timestamp),
+    // Session merges and event filters look events up by their visit.
+    index("idx_events_visit").on(t.visitId),
     uniqueIndex("idx_events_tracking").on(t.siteId, t.trackingId),
   ]
 )
+
+/**
+ * A completed order reported by a payment provider. `pageId` is the page on
+ * which the visitor opened the checkout; the page keeps pointing at its
+ * visit when sessions merge, so attribution needs no upkeep. Amounts are in
+ * the currency's minor unit and exclude tax. No customer details are stored.
+ */
+export const payments = sqliteTable(
+  "payments",
+  {
+    id: int("id").primaryKey({ autoIncrement: true }),
+    siteId: text("site_id")
+      .notNull()
+      .references(() => sites.id),
+    provider: text("provider", { enum: ["polar"] }).notNull(),
+    orderId: text("order_id").notNull(),
+    pageId: int("page_id"),
+    reference: text("reference"),
+    amount: int("amount").notNull(),
+    refundedAmount: int("refunded_amount").notNull().default(0),
+    currency: text("currency").notNull(),
+    status: text("status", {
+      enum: ["paid", "partially_refunded", "refunded"],
+    }).notNull(),
+    product: text("product"),
+    billingReason: text("billing_reason"),
+    paidAt: int("paid_at").notNull(),
+    updatedAt: int("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("idx_payments_order").on(t.provider, t.orderId),
+    index("idx_payments_site_paid").on(t.siteId, t.paidAt),
+    index("idx_payments_page").on(t.pageId),
+  ]
+)
+export type Payment = typeof payments.$inferSelect
+export type NewPayment = typeof payments.$inferInsert
+export const selectPaymentSchema = createSelectSchema(payments)
+export const insertPaymentSchema = createInsertSchema(payments, {
+  orderId: (schema) => schema.min(1).max(200),
+  amount: (schema) => schema.int().min(0),
+  refundedAmount: (schema) => schema.int().min(0),
+  currency: (schema) => schema.min(3).max(8),
+  product: (schema) => schema.max(300),
+  billingReason: (schema) => schema.max(100),
+  reference: (schema) => schema.max(200),
+}).omit({ id: true })
+export type InsertPaymentInput = z.infer<typeof insertPaymentSchema>
 
 // ---------------------------------------------------------------------------
 // Rollup tables — written by cron, read by the dashboard (§7, §8)

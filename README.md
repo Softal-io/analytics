@@ -86,14 +86,61 @@ conversions, etc.):
 `name` is required; `props` is an optional JSON-serializable object
 (kept small — it's stored as a raw JSON blob per event).
 
+### Tracking payments (Polar)
+
+A payment is attributed to the visit that opened the checkout, so the
+dashboard can show which sources, pages, links, devices and locations lead to
+revenue.
+
+1. **Checkout links need no change.** When a visitor presses a link to
+   `polar.sh` (for example `https://buy.polar.sh/polar_cl_...`), the snippet
+   adds `reference_id=wa.<site id>.<page id>` to it. Polar stores that value
+   in the order's metadata. Add `data-wa-checkout` to a link on any other
+   host to have it tagged the same way. A `reference_id` you set yourself is
+   left alone.
+2. **Checkouts created on a server** can pass the same value as metadata:
+   send `window.wa.reference()` from the browser and create the checkout with
+   `metadata: { reference_id: "<that value>" }`.
+3. **Add a webhook in Polar** (Settings → Webhooks) pointing at
+   `https://analytics.example.com/api/webhooks/polar`, with the events
+   `order.paid`, `order.updated` and `order.refunded`.
+4. **Store its signing secret** as a Worker secret (and in `.dev.vars` for
+   local testing):
+
+   ```bash
+   npm run cf -- secret put POLAR_WEBHOOK_SECRET
+   ```
+
+Until the secret is set the endpoint answers 503 and records nothing. Several
+secrets can be separated by commas. Orders without a reference (purchases
+started outside your websites) are skipped; to record them against one
+website anyway, add `?site=<site id>` to the webhook URL.
+
+Amounts are stored net of tax, in the currency's minor unit. No customer
+details are stored. Attribution is to the visit in which the checkout was
+opened: the tracker is cookieless, so a visitor who returns days later is a
+new visit, and that later visit receives the payment.
+
 ## Dashboard
 
 `http://localhost:3006/` (or your deployed URL) — one page, a site
-switcher + date-range picker (`today` / `7d` / `30d` / `6m` / `1y`) at
-the top, stat cards + chart + filterable ranked lists (top/entry/exit
+switcher + date-range picker (`today` / `yesterday` / `7d` / `30d` / `6m` /
+`1y`) at the top, stat cards + chart + ranked lists (top/entry/exit
 pages, outbound links, referrers/campaigns, recent activity, browser/OS/device type,
-country/region/city, and custom events) below. Add more sites any time
-from the same page.
+country/region/city, custom events, and payments) below. Add more sites any
+time from the same page.
+
+Each stat shows its change against the equally long period before it. A
+range still in progress is compared up to the same time of day: today so far
+against yesterday until this time, the last 7 days against the 7 before them.
+
+Click any row to filter the whole dashboard to the visits behind it: a page,
+an outbound link, a referrer or campaign, a browser, a country, an event, or
+the visits that paid. Filters combine, appear as removable chips under the
+header, and live in the URL. A filter selects visits, so every card then
+describes what those visits did: filtering to `/pricing` shows the sources,
+devices and locations of visits that viewed it, the other pages they saw, the
+links they clicked, and whether they paid.
 
 Live visitor count (top-left badge) is pushed over a WebSocket from the
 site's `LiveVisitors` Durable Object — no polling. Five-minute visitor presence
@@ -185,27 +232,35 @@ The read-only `/ext/v1/*` API uses a separate `ANALYTICS_API_TOKEN` Bearer
 token for integrations such as another application’s dashboard. Keep that token on
 the calling server, never in browser code. Unset tokens disable the external API.
 
-| Route                        | Method                 | Notes                                                   |
-| ---------------------------- | ---------------------- | ------------------------------------------------------- |
-| `/collect`                   | `POST`                 | **Public.** Ingestion — called by the tracking snippet. |
-| `/api/sites`                 | `GET`, `POST`          | List / create sites.                                    |
-| `/api/sites/:id`             | `GET`, `DELETE`        | Fetch / delete a site.                                  |
-| `/api/sites/:id/summary`     | `GET`                  | Stat-card totals for `?range=`.                         |
-| `/api/sites/:id/timeseries`  | `GET`                  | Chart data — daily points, or hourly for `range=today`. |
-| `/api/sites/:id/pages`       | `GET`                  | `?view=top\|entered\|exited`.                           |
-| `/api/sites/:id/sources`     | `GET`                  | `?view=referrer\|links\|utm`.                           |
-| `/api/sites/:id/devices`     | `GET`                  | `?view=browser\|os\|device`.                            |
-| `/api/sites/:id/locations`   | `GET`                  | `?view=country\|region\|city`.                          |
-| `/api/sites/:id/events`      | `GET`                  | Top custom events.                                      |
-| `/api/sites/:id/realtime/ws` | `GET` (WS upgrade)     | Live visitor count, proxied to the `LiveVisitors` DO.   |
-| `/api/sites/:id/public-view` | `GET`, `PUT`           | Admin-only public sharing settings.                     |
-| `/api/admin/access`          | `GET`, `PUT`, `DELETE` | Admin-only email grants and roles.                      |
-| `/api/public/:slug`          | `GET`                  | Public, selected analytics only; 404 when disabled.     |
-| `/api/public/:slug/realtime` | `GET`                  | Public count only, if explicitly enabled.               |
-| `/api/auth/*`                | Better Auth            | Google sign-in, callback, session, and sign-out.        |
+| Route                        | Method                 | Notes                                                     |
+| ---------------------------- | ---------------------- | --------------------------------------------------------- |
+| `/collect`                   | `POST`                 | **Public.** Ingestion — called by the tracking snippet.   |
+| `/api/sites`                 | `GET`, `POST`          | List / create sites.                                      |
+| `/api/sites/:id`             | `GET`, `DELETE`        | Fetch / delete a site.                                    |
+| `/api/sites/:id/summary`     | `GET`                  | Stat-card totals for `?range=`.                           |
+| `/api/sites/:id/timeseries`  | `GET`                  | Chart data — daily points; hourly for today or yesterday. |
+| `/api/sites/:id/pages`       | `GET`                  | `?view=top\|entered\|exited`.                             |
+| `/api/sites/:id/sources`     | `GET`                  | `?view=referrer\|links\|utm`.                             |
+| `/api/sites/:id/devices`     | `GET`                  | `?view=browser\|os\|device`.                              |
+| `/api/sites/:id/locations`   | `GET`                  | `?view=country\|region\|city`.                            |
+| `/api/sites/:id/activity`    | `GET`                  | Top custom events.                                        |
+| `/api/sites/:id/payments`    | `GET`                  | Revenue, payment count, and recent attributed payments.   |
+| `/api/webhooks/polar`        | `POST`                 | **Signed.** Order events from Polar.                      |
+| `/api/sites/:id/realtime/ws` | `GET` (WS upgrade)     | Live visitor count, proxied to the `LiveVisitors` DO.     |
+| `/api/sites/:id/public-view` | `GET`, `PUT`           | Admin-only public sharing settings.                       |
+| `/api/admin/access`          | `GET`, `PUT`, `DELETE` | Admin-only email grants and roles.                        |
+| `/api/public/:slug`          | `GET`                  | Public, selected analytics only; 404 when disabled.       |
+| `/api/public/:slug/realtime` | `GET`                  | Public count only, if explicitly enabled.                 |
+| `/api/auth/*`                | Better Auth            | Google sign-in, callback, session, and sign-out.          |
 
-`range` accepts `today | 7d | 30d | 6m | 1y | custom` (custom takes
-`from`/`to` as `YYYY-MM-DD`). Current, complete past days use cached
+`range` accepts `today | yesterday | 7d | 30d | 6m | 1y | custom` (custom
+takes `from`/`to` as `YYYY-MM-DD`, up to 1,100 days). Report routes also
+accept visit filters (`page`, `entry`, `exit`, `referrer`, `utm`, `browser`,
+`os`, `device`, `country`, `region`, `city`, `link`, `event`, `paid=1`),
+`limit` for ranked lists (default 10, at most 200), and, on `summary`,
+`compare=previous`. The same parameters work on `/ext/v1/sites/:id/*`.
+Daily rollups hold one dimension each, so a filtered report reads raw records
+for its whole range. Current, complete past days use cached
 `daily_*` totals and breakdowns. Today and any missing or invalidated days
 use raw records. Unique visitors are
 deduplicated across the full selected range using an indexed query of retained
@@ -333,6 +388,7 @@ files; change the template or the private inputs instead.
 | `CLOUDFLARE_ACCOUNT_ID` (optional if Wrangler identifies your account)   | Private build variable; locally, `.deployment.env.local`         |
 | `BETTER_AUTH_URL`, `TRACKER_ORIGIN`, custom domain route                 | Generated from `ANALYTICS_ORIGIN`                                |
 | `BETTER_AUTH_SECRET`, Google credentials, optional `ANALYTICS_API_TOKEN` | Worker runtime secrets; locally, `.dev.vars`                     |
+| Optional `POLAR_WEBHOOK_SECRET`                                          | Worker runtime secret; locally, `.dev.vars`                      |
 | Cloudflare deployment API token                                          | Cloudflare Builds' API token setting, or your CLI authentication |
 
 The domain and resource IDs are deployment metadata, rather than credentials,

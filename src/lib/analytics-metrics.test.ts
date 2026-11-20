@@ -1,5 +1,4 @@
-import { DatabaseSync } from "node:sqlite"
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { execFileSync } from "node:child_process"
@@ -10,6 +9,7 @@ import {
   normalizeOutboundUrl,
   processCollectRequest,
 } from "../routes/collect"
+import { mockD1, openTestDatabase } from "../test/d1"
 import { recordEngagement, recordInteraction } from "./engagement"
 import { recordPage } from "./session"
 import { computeSummary } from "./summary"
@@ -34,6 +34,7 @@ import {
 } from "./analytics-config"
 import { parseReferrer } from "./lookups"
 import type { CollectRequest } from "./collect-schema"
+import type { DatabaseSync } from "node:sqlite"
 
 const d1 = vi.hoisted(() => ({ prepare: vi.fn(), batch: vi.fn() }))
 const live = vi.hoisted(() => ({ ping: vi.fn().mockResolvedValue(1) }))
@@ -70,47 +71,11 @@ beforeEach(() => {
   live.ping.mockClear()
   vi.useFakeTimers()
   vi.setSystemTime(new Date("2026-09-03T12:00:00Z"))
-  database = new DatabaseSync(":memory:")
-  const migrations = new URL("../../drizzle/", import.meta.url)
-  for (const file of readdirSync(migrations)
-    .filter((name) => /^\d+.*\.sql$/.test(name))
-    .sort()) {
-    database.exec(readFileSync(new URL(file, migrations), "utf8"))
-  }
-  d1.prepare.mockImplementation((query: string) => {
-    const prepare = (values: Array<string | number> = []) => {
-      boundStatements.push({ query, values })
-      return {
-        bind: (...bound: Array<string | number>) => prepare(bound),
-        all: () =>
-          Promise.resolve({ results: database.prepare(query).all(...values) }),
-        run: () =>
-          Promise.resolve({
-            meta: database.prepare(query).run(...values),
-            results: [],
-          }),
-        raw: () => {
-          const statement = database.prepare(query)
-          statement.setReturnArrays(true)
-          return Promise.resolve(statement.all(...values))
-        },
-      }
-    }
-    return prepare()
-  })
-  d1.batch.mockImplementation(
-    async (statements: Array<{ run: () => Promise<unknown> }>) => {
-      database.exec("BEGIN")
-      try {
-        const results = []
-        for (const statement of statements) results.push(await statement.run())
-        database.exec("COMMIT")
-        return results
-      } catch (error) {
-        database.exec("ROLLBACK")
-        throw error
-      }
-    }
+  database = openTestDatabase()
+  mockD1(
+    d1,
+    () => database,
+    (query, values) => boundStatements.push({ query, values })
   )
   database
     .prepare("INSERT INTO sites VALUES (?, ?, ?, ?, ?)")

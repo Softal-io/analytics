@@ -19,12 +19,14 @@ import { Route as ApiAdminAccessRouteImport } from './routes/api/admin.access'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth.$'
 import { Route as ApiPublicSlugRouteImport } from './routes/api/public.$slug'
 import { Route as ApiSitesSiteIdRouteImport } from './routes/api/sites.$siteId'
+import { Route as ApiWebhooksPolarRouteImport } from './routes/api/webhooks.polar'
 import { Route as ApiPublicSlugRealtimeRouteImport } from './routes/api/public.$slug.realtime'
 import { Route as ApiPublicSlugSourceDetailsRouteImport } from './routes/api/public.$slug.source-details'
 import { Route as ApiSitesSiteIdActivityRouteImport } from './routes/api/sites.$siteId.activity'
 import { Route as ApiSitesSiteIdDevicesRouteImport } from './routes/api/sites.$siteId.devices'
 import { Route as ApiSitesSiteIdLocationsRouteImport } from './routes/api/sites.$siteId.locations'
 import { Route as ApiSitesSiteIdPagesRouteImport } from './routes/api/sites.$siteId.pages'
+import { Route as ApiSitesSiteIdPaymentsRouteImport } from './routes/api/sites.$siteId.payments'
 import { Route as ApiSitesSiteIdPublicViewRouteImport } from './routes/api/sites.$siteId.public-view'
 import { Route as ApiSitesSiteIdSourceDetailsRouteImport } from './routes/api/sites.$siteId.source-details'
 import { Route as ApiSitesSiteIdSourcesRouteImport } from './routes/api/sites.$siteId.sources'
@@ -82,6 +84,11 @@ const ApiSitesSiteIdRoute = ApiSitesSiteIdRouteImport.update({
   path: '/$siteId',
   getParentRoute: () => ApiSitesRoute,
 } as any)
+const ApiWebhooksPolarRoute = ApiWebhooksPolarRouteImport.update({
+  id: '/api/webhooks/polar',
+  path: '/api/webhooks/polar',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicSlugRealtimeRoute = ApiPublicSlugRealtimeRouteImport.update({
   id: '/realtime',
   path: '/realtime',
@@ -111,6 +118,11 @@ const ApiSitesSiteIdLocationsRoute = ApiSitesSiteIdLocationsRouteImport.update({
 const ApiSitesSiteIdPagesRoute = ApiSitesSiteIdPagesRouteImport.update({
   id: '/pages',
   path: '/pages',
+  getParentRoute: () => ApiSitesSiteIdRoute,
+} as any)
+const ApiSitesSiteIdPaymentsRoute = ApiSitesSiteIdPaymentsRouteImport.update({
+  id: '/payments',
+  path: '/payments',
   getParentRoute: () => ApiSitesSiteIdRoute,
 } as any)
 const ApiSitesSiteIdPublicViewRoute =
@@ -159,12 +171,14 @@ export interface FileRoutesByFullPath {
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/public/$slug': typeof ApiPublicSlugRouteWithChildren
   '/api/sites/$siteId': typeof ApiSitesSiteIdRouteWithChildren
+  '/api/webhooks/polar': typeof ApiWebhooksPolarRoute
   '/api/public/$slug/realtime': typeof ApiPublicSlugRealtimeRoute
   '/api/public/$slug/source-details': typeof ApiPublicSlugSourceDetailsRoute
   '/api/sites/$siteId/activity': typeof ApiSitesSiteIdActivityRoute
   '/api/sites/$siteId/devices': typeof ApiSitesSiteIdDevicesRoute
   '/api/sites/$siteId/locations': typeof ApiSitesSiteIdLocationsRoute
   '/api/sites/$siteId/pages': typeof ApiSitesSiteIdPagesRoute
+  '/api/sites/$siteId/payments': typeof ApiSitesSiteIdPaymentsRoute
   '/api/sites/$siteId/public-view': typeof ApiSitesSiteIdPublicViewRoute
   '/api/sites/$siteId/source-details': typeof ApiSitesSiteIdSourceDetailsRoute
   '/api/sites/$siteId/sources': typeof ApiSitesSiteIdSourcesRoute
@@ -183,12 +197,14 @@ export interface FileRoutesByTo {
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/public/$slug': typeof ApiPublicSlugRouteWithChildren
   '/api/sites/$siteId': typeof ApiSitesSiteIdRouteWithChildren
+  '/api/webhooks/polar': typeof ApiWebhooksPolarRoute
   '/api/public/$slug/realtime': typeof ApiPublicSlugRealtimeRoute
   '/api/public/$slug/source-details': typeof ApiPublicSlugSourceDetailsRoute
   '/api/sites/$siteId/activity': typeof ApiSitesSiteIdActivityRoute
   '/api/sites/$siteId/devices': typeof ApiSitesSiteIdDevicesRoute
   '/api/sites/$siteId/locations': typeof ApiSitesSiteIdLocationsRoute
   '/api/sites/$siteId/pages': typeof ApiSitesSiteIdPagesRoute
+  '/api/sites/$siteId/payments': typeof ApiSitesSiteIdPaymentsRoute
   '/api/sites/$siteId/public-view': typeof ApiSitesSiteIdPublicViewRoute
   '/api/sites/$siteId/source-details': typeof ApiSitesSiteIdSourceDetailsRoute
   '/api/sites/$siteId/sources': typeof ApiSitesSiteIdSourcesRoute
@@ -208,12 +224,14 @@ export interface FileRoutesById {
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/public/$slug': typeof ApiPublicSlugRouteWithChildren
   '/api/sites/$siteId': typeof ApiSitesSiteIdRouteWithChildren
+  '/api/webhooks/polar': typeof ApiWebhooksPolarRoute
   '/api/public/$slug/realtime': typeof ApiPublicSlugRealtimeRoute
   '/api/public/$slug/source-details': typeof ApiPublicSlugSourceDetailsRoute
   '/api/sites/$siteId/activity': typeof ApiSitesSiteIdActivityRoute
   '/api/sites/$siteId/devices': typeof ApiSitesSiteIdDevicesRoute
   '/api/sites/$siteId/locations': typeof ApiSitesSiteIdLocationsRoute
   '/api/sites/$siteId/pages': typeof ApiSitesSiteIdPagesRoute
+  '/api/sites/$siteId/payments': typeof ApiSitesSiteIdPaymentsRoute
   '/api/sites/$siteId/public-view': typeof ApiSitesSiteIdPublicViewRoute
   '/api/sites/$siteId/source-details': typeof ApiSitesSiteIdSourceDetailsRoute
   '/api/sites/$siteId/sources': typeof ApiSitesSiteIdSourcesRoute
@@ -234,12 +252,14 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/public/$slug'
     | '/api/sites/$siteId'
+    | '/api/webhooks/polar'
     | '/api/public/$slug/realtime'
     | '/api/public/$slug/source-details'
     | '/api/sites/$siteId/activity'
     | '/api/sites/$siteId/devices'
     | '/api/sites/$siteId/locations'
     | '/api/sites/$siteId/pages'
+    | '/api/sites/$siteId/payments'
     | '/api/sites/$siteId/public-view'
     | '/api/sites/$siteId/source-details'
     | '/api/sites/$siteId/sources'
@@ -258,12 +278,14 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/public/$slug'
     | '/api/sites/$siteId'
+    | '/api/webhooks/polar'
     | '/api/public/$slug/realtime'
     | '/api/public/$slug/source-details'
     | '/api/sites/$siteId/activity'
     | '/api/sites/$siteId/devices'
     | '/api/sites/$siteId/locations'
     | '/api/sites/$siteId/pages'
+    | '/api/sites/$siteId/payments'
     | '/api/sites/$siteId/public-view'
     | '/api/sites/$siteId/source-details'
     | '/api/sites/$siteId/sources'
@@ -282,12 +304,14 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/public/$slug'
     | '/api/sites/$siteId'
+    | '/api/webhooks/polar'
     | '/api/public/$slug/realtime'
     | '/api/public/$slug/source-details'
     | '/api/sites/$siteId/activity'
     | '/api/sites/$siteId/devices'
     | '/api/sites/$siteId/locations'
     | '/api/sites/$siteId/pages'
+    | '/api/sites/$siteId/payments'
     | '/api/sites/$siteId/public-view'
     | '/api/sites/$siteId/source-details'
     | '/api/sites/$siteId/sources'
@@ -306,6 +330,7 @@ export interface RootRouteChildren {
   ApiAdminAccessRoute: typeof ApiAdminAccessRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiPublicSlugRoute: typeof ApiPublicSlugRouteWithChildren
+  ApiWebhooksPolarRoute: typeof ApiWebhooksPolarRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -380,6 +405,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSitesSiteIdRouteImport
       parentRoute: typeof ApiSitesRoute
     }
+    '/api/webhooks/polar': {
+      id: '/api/webhooks/polar'
+      path: '/api/webhooks/polar'
+      fullPath: '/api/webhooks/polar'
+      preLoaderRoute: typeof ApiWebhooksPolarRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/$slug/realtime': {
       id: '/api/public/$slug/realtime'
       path: '/realtime'
@@ -420,6 +452,13 @@ declare module '@tanstack/react-router' {
       path: '/pages'
       fullPath: '/api/sites/$siteId/pages'
       preLoaderRoute: typeof ApiSitesSiteIdPagesRouteImport
+      parentRoute: typeof ApiSitesSiteIdRoute
+    }
+    '/api/sites/$siteId/payments': {
+      id: '/api/sites/$siteId/payments'
+      path: '/payments'
+      fullPath: '/api/sites/$siteId/payments'
+      preLoaderRoute: typeof ApiSitesSiteIdPaymentsRouteImport
       parentRoute: typeof ApiSitesSiteIdRoute
     }
     '/api/sites/$siteId/public-view': {
@@ -472,6 +511,7 @@ interface ApiSitesSiteIdRouteChildren {
   ApiSitesSiteIdDevicesRoute: typeof ApiSitesSiteIdDevicesRoute
   ApiSitesSiteIdLocationsRoute: typeof ApiSitesSiteIdLocationsRoute
   ApiSitesSiteIdPagesRoute: typeof ApiSitesSiteIdPagesRoute
+  ApiSitesSiteIdPaymentsRoute: typeof ApiSitesSiteIdPaymentsRoute
   ApiSitesSiteIdPublicViewRoute: typeof ApiSitesSiteIdPublicViewRoute
   ApiSitesSiteIdSourceDetailsRoute: typeof ApiSitesSiteIdSourceDetailsRoute
   ApiSitesSiteIdSourcesRoute: typeof ApiSitesSiteIdSourcesRoute
@@ -485,6 +525,7 @@ const ApiSitesSiteIdRouteChildren: ApiSitesSiteIdRouteChildren = {
   ApiSitesSiteIdDevicesRoute: ApiSitesSiteIdDevicesRoute,
   ApiSitesSiteIdLocationsRoute: ApiSitesSiteIdLocationsRoute,
   ApiSitesSiteIdPagesRoute: ApiSitesSiteIdPagesRoute,
+  ApiSitesSiteIdPaymentsRoute: ApiSitesSiteIdPaymentsRoute,
   ApiSitesSiteIdPublicViewRoute: ApiSitesSiteIdPublicViewRoute,
   ApiSitesSiteIdSourceDetailsRoute: ApiSitesSiteIdSourceDetailsRoute,
   ApiSitesSiteIdSourcesRoute: ApiSitesSiteIdSourcesRoute,
@@ -533,6 +574,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAdminAccessRoute: ApiAdminAccessRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiPublicSlugRoute: ApiPublicSlugRouteWithChildren,
+  ApiWebhooksPolarRoute: ApiWebhooksPolarRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

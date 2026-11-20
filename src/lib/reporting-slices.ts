@@ -1,5 +1,5 @@
 import { and, eq, gte, lt, lte, or, sql } from "drizzle-orm"
-import { dateRangeList, startOfDayUtcMs } from "./dates"
+import { dateRangeList, shiftDate, startOfDayUtcMs } from "./dates"
 import type { ResolvedRange } from "./dates"
 import type { SQL } from "drizzle-orm"
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core"
@@ -21,38 +21,50 @@ export interface ReportingSlices {
   raw: Array<{ startSec: number; endSec: number }>
 }
 
+export interface ReportingOptions {
+  /** Exclusive end of the report, for a period compared up to the same time. */
+  untilSec?: number
+  /** Rollups hold one dimension each, so filtered reports read raw records. */
+  forceRaw?: boolean
+}
+
 export async function getReportingSlices(
   site: Site,
-  range: ResolvedRange
+  range: ResolvedRange,
+  options: ReportingOptions = {}
 ): Promise<ReportingSlices> {
-  const markers = await db
-    .select()
-    .from(dailyRollupStatus)
-    .where(
-      and(
-        eq(dailyRollupStatus.siteId, site.id),
-        gte(dailyRollupStatus.date, range.fromDate),
-        lte(dailyRollupStatus.date, range.toDate)
-      )
-    )
+  const markers = options.forceRaw
+    ? []
+    : await db
+        .select()
+        .from(dailyRollupStatus)
+        .where(
+          and(
+            eq(dailyRollupStatus.siteId, site.id),
+            gte(dailyRollupStatus.date, range.fromDate),
+            lte(dailyRollupStatus.date, range.toDate)
+          )
+        )
   const byDate = new Map(markers.map((row) => [row.date, row]))
   const dates = dateRangeList(range.fromDate, range.toDate)
-  const nowSec = Math.floor(Date.now() / 1000) + 1
+  const limitSec = Math.min(
+    Math.floor(Date.now() / 1000) + 1,
+    options.untilSec ?? Infinity
+  )
   const days = dates
     .map((date) => {
-      const next = new Date(`${date}T00:00:00Z`)
-      next.setUTCDate(next.getUTCDate() + 1)
       const startSec = Math.floor(startOfDayUtcMs(date, site.timezone) / 1000)
       const dayEnd = Math.floor(
-        startOfDayUtcMs(next.toISOString().slice(0, 10), site.timezone) / 1000
+        startOfDayUtcMs(shiftDate(date, 1), site.timezone) / 1000
       )
       const marker = byDate.get(date)
       return {
         date,
         startSec,
-        endSec: Math.min(dayEnd, nowSec),
+        endSec: Math.min(dayEnd, limitSec),
         cached:
           date < range.today &&
+          dayEnd <= limitSec &&
           marker?.version === ROLLUP_VERSION &&
           marker.startSec === startSec &&
           marker.endSec === dayEnd,
@@ -72,19 +84,35 @@ export async function getReportingSlices(
     previousCached = day.cached
   }
   // D1 has a bound-parameter limit. Fragmented caches fall back to one raw scan.
-  if (cached.length + raw.length > 16 && days.length) {
-    days.forEach((day) => {
-      day.cached = false
-    })
-    return {
-      days,
-      cached: [],
-      raw: [
-        { startSec: days[0].startSec, endSec: days[days.length - 1].endSec },
-      ],
-    }
-  }
+  if (cached.length + raw.length > 16 && days.length)
+    return rawSlices({ days, cached, raw })
   return { days, cached, raw }
+}
+
+/**
+ * The slices a report reads. Rollups hold one dimension each and cannot
+ * answer a filtered question, so a filtered report reads raw records only,
+ * even when it was handed slices that include rollups.
+ */
+export async function reportSlices(
+  site: Site,
+  range: ResolvedRange,
+  reporting: ReportingSlices | undefined,
+  filtered: boolean
+): Promise<ReportingSlices> {
+  if (reporting) return filtered ? rawSlices(reporting) : reporting
+  return getReportingSlices(site, range, { forceRaw: filtered })
+}
+
+/** The same days as one raw interval, ignoring every rollup. */
+function rawSlices(slices: ReportingSlices): ReportingSlices {
+  if (!slices.cached.length) return slices
+  const days = slices.days.map((day) => ({ ...day, cached: false }))
+  return {
+    days,
+    cached: [],
+    raw: [{ startSec: days[0].startSec, endSec: days[days.length - 1].endSec }],
+  }
 }
 
 export function cachedDateFilter(

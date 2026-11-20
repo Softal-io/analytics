@@ -33,6 +33,7 @@ export const Route = createFileRoute("/api/sites/$siteId")({
           )
 
         await env.DB.batch([
+          bindDelete("payments"),
           bindDelete("events"),
           bindDelete("outbound_links"),
           bindDelete("pages"),

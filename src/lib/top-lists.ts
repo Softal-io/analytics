@@ -1,11 +1,15 @@
 import { and, eq, isNotNull, ne, or, sql } from "drizzle-orm"
 import {
   cachedDateFilter,
-  getReportingSlices,
   rawTimeFilter,
+  reportSlices,
 } from "./reporting-slices"
 import { OMITTED_OUTBOUND_URL } from "./analytics-config"
+import { formatCampaign, formatReferrer } from "./format"
+import { hasVisitFilters } from "./visit-filter-schema"
+import { outboundFilter, visitRowsFilter, visitsFilter } from "./visit-filters"
 import type { ReportingSlices } from "./reporting-slices"
+import type { VisitFilters } from "./visit-filter-schema"
 import type { SourceDetails } from "./source-details"
 import type { Site } from "@/db/schema"
 import type { ResolvedRange } from "@/lib/dates"
@@ -59,9 +63,15 @@ export async function computeTopPages(
   resolved: ResolvedRange,
   dimension: PageDimension = "top",
   limit = 10,
-  reporting?: ReportingSlices
+  reporting?: ReportingSlices,
+  filters?: VisitFilters
 ): Promise<TopListResult<TopPageRow>> {
-  const slices = reporting ?? (await getReportingSlices(site, resolved))
+  const slices = await reportSlices(
+    site,
+    resolved,
+    reporting,
+    hasVisitFilters(filters)
+  )
   const hasCached = slices.cached.length > 0
   const hasRaw = slices.raw.length > 0
   const merged = new Map<string, number>()
@@ -101,7 +111,11 @@ export async function computeTopPages(
         })
         .from(pages)
         .where(
-          and(eq(pages.siteId, site.id), rawTimeFilter(pages.timestamp, slices))
+          and(
+            eq(pages.siteId, site.id),
+            rawTimeFilter(pages.timestamp, slices),
+            visitRowsFilter(site.id, filters, "pages")
+          )
         )
         .groupBy(pages.path)
 
@@ -121,7 +135,8 @@ export async function computeTopPages(
           and(
             eq(visits.siteId, site.id),
             rawTimeFilter(visits.startedAt, slices),
-            isNotNull(pageColumn)
+            isNotNull(pageColumn),
+            visitsFilter(site.id, filters)
           )
         )
         .groupBy(pageColumn)
@@ -154,14 +169,14 @@ export interface TopSourceRow {
   details?: SourceDetails
 }
 
-function formatUtmLabel(
-  source: string,
-  medium: string,
-  campaign: string
-): string {
-  const channel = [source, medium].filter(Boolean).join(" / ")
-  if (campaign && channel) return `${campaign} · ${channel}`
-  return campaign || channel
+/** One unreadable stored URL must not take the whole list down. */
+function outboundHostname(url: string): string | undefined {
+  if (url === OMITTED_OUTBOUND_URL) return undefined
+  try {
+    return new URL(url).hostname
+  } catch {
+    return undefined
+  }
 }
 
 export async function computeTopSources(
@@ -169,9 +184,15 @@ export async function computeTopSources(
   resolved: ResolvedRange,
   dimension: SourceDimension = "referrer",
   limit = 10,
-  reporting?: ReportingSlices
+  reporting?: ReportingSlices,
+  filters?: VisitFilters
 ): Promise<TopListResult<TopSourceRow>> {
-  const slices = reporting ?? (await getReportingSlices(site, resolved))
+  const slices = await reportSlices(
+    site,
+    resolved,
+    reporting,
+    hasVisitFilters(filters)
+  )
   const hasCached = slices.cached.length > 0
   const hasRaw = slices.raw.length > 0
   const merged = new Map<string, TopSourceRow>()
@@ -203,7 +224,8 @@ export async function computeTopSources(
             .where(
               and(
                 eq(outboundLinks.siteId, site.id),
-                rawTimeFilter(outboundLinks.timestamp, slices)
+                rawTimeFilter(outboundLinks.timestamp, slices),
+                outboundFilter(site.id, filters)
               )
             )
             .groupBy(outboundLinks.url)
@@ -218,10 +240,7 @@ export async function computeTopSources(
           row.url === OMITTED_OUTBOUND_URL
             ? "URL exceeds recording limit"
             : row.url.replace(/^https?:\/\//, ""),
-        referrerDomain:
-          row.url === OMITTED_OUTBOUND_URL
-            ? undefined
-            : new URL(row.url).hostname,
+        referrerDomain: outboundHostname(row.url),
         visits: (existing?.visits ?? 0) + Number(row.clicks),
       })
     }
@@ -273,7 +292,8 @@ export async function computeTopSources(
               and(
                 eq(visits.siteId, site.id),
                 rawTimeFilter(visits.startedAt, slices),
-                hasUtmRaw
+                hasUtmRaw,
+                visitsFilter(site.id, filters)
               )
             )
             .groupBy(sources.utmSource, sources.utmMedium, sources.utmCampaign)
@@ -288,7 +308,7 @@ export async function computeTopSources(
       const existing = merged.get(key)
       merged.set(key, {
         key,
-        label: formatUtmLabel(source, medium, campaign),
+        label: formatCampaign(source, medium, campaign),
         visits: (existing?.visits ?? 0) + Number(row.visits),
         details: {
           utmSource: source,
@@ -327,7 +347,8 @@ export async function computeTopSources(
             .where(
               and(
                 eq(visits.siteId, site.id),
-                rawTimeFilter(visits.startedAt, slices)
+                rawTimeFilter(visits.startedAt, slices),
+                visitsFilter(site.id, filters)
               )
             )
             .groupBy(sources.referrerDomain)
@@ -338,12 +359,7 @@ export async function computeTopSources(
       const existing = merged.get(row.referrerDomain)
       merged.set(row.referrerDomain, {
         key: row.referrerDomain,
-        label:
-          row.referrerDomain === "(direct)"
-            ? "Direct"
-            : row.referrerDomain === "(unknown)"
-              ? "Unknown"
-              : row.referrerDomain,
+        label: formatReferrer(row.referrerDomain),
         referrerDomain: row.referrerDomain,
         details: {
           referrerDomain: row.referrerDomain,
@@ -379,9 +395,15 @@ export async function computeTopDevices(
   resolved: ResolvedRange,
   dimension: DeviceDimension = "browser",
   limit = 10,
-  reporting?: ReportingSlices
+  reporting?: ReportingSlices,
+  filters?: VisitFilters
 ): Promise<TopListResult<TopDeviceRow>> {
-  const slices = reporting ?? (await getReportingSlices(site, resolved))
+  const slices = await reportSlices(
+    site,
+    resolved,
+    reporting,
+    hasVisitFilters(filters)
+  )
   const hasCached = slices.cached.length > 0
   const hasRaw = slices.raw.length > 0
   const merged = new Map<string, number>()
@@ -425,7 +447,8 @@ export async function computeTopDevices(
           .where(
             and(
               eq(visits.siteId, site.id),
-              rawTimeFilter(visits.startedAt, slices)
+              rawTimeFilter(visits.startedAt, slices),
+              visitsFilter(site.id, filters)
             )
           )
           .groupBy(rawColumn)
@@ -465,9 +488,15 @@ export async function computeTopLocations(
   resolved: ResolvedRange,
   dimension: LocationDimension = "country",
   limit = 10,
-  reporting?: ReportingSlices
+  reporting?: ReportingSlices,
+  filters?: VisitFilters
 ): Promise<TopListResult<TopLocationRow>> {
-  const slices = reporting ?? (await getReportingSlices(site, resolved))
+  const slices = await reportSlices(
+    site,
+    resolved,
+    reporting,
+    hasVisitFilters(filters)
+  )
   const hasCached = slices.cached.length > 0
   const hasRaw = slices.raw.length > 0
   const merged = new Map<string, TopLocationRow>()
@@ -513,7 +542,8 @@ export async function computeTopLocations(
             eq(visits.siteId, site.id),
             rawTimeFilter(visits.startedAt, slices),
             dimension === "region" ? ne(locations.region, "") : undefined,
-            dimension === "city" ? ne(locations.city, "") : undefined
+            dimension === "city" ? ne(locations.city, "") : undefined,
+            visitsFilter(site.id, filters)
           )
         )
         .groupBy(locations.country, rawRegion, rawCity)
@@ -548,9 +578,15 @@ export async function computeEventList(
   site: Site,
   resolved: ResolvedRange,
   limit = 10,
-  reporting?: ReportingSlices
+  reporting?: ReportingSlices,
+  filters?: VisitFilters
 ): Promise<TopListResult<TopEventRow>> {
-  const slices = reporting ?? (await getReportingSlices(site, resolved))
+  const slices = await reportSlices(
+    site,
+    resolved,
+    reporting,
+    hasVisitFilters(filters)
+  )
   const hasCached = slices.cached.length > 0
   const hasRaw = slices.raw.length > 0
   const merged = new Map<string, number>()
@@ -578,7 +614,8 @@ export async function computeEventList(
           .where(
             and(
               eq(events.siteId, site.id),
-              rawTimeFilter(events.timestamp, slices)
+              rawTimeFilter(events.timestamp, slices),
+              visitRowsFilter(site.id, filters, "events")
             )
           )
           .groupBy(events.name)
@@ -602,7 +639,9 @@ export async function computeTopEvents(
   site: Site,
   resolved: ResolvedRange,
   limit = 10,
-  reporting?: ReportingSlices
+  reporting?: ReportingSlices,
+  filters?: VisitFilters
 ): Promise<Array<TopEventRow>> {
-  return (await computeEventList(site, resolved, limit, reporting)).rows
+  return (await computeEventList(site, resolved, limit, reporting, filters))
+    .rows
 }

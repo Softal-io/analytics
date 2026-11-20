@@ -1,15 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router"
 import type { LocationDimension } from "@/lib/top-lists"
-import { resolveSiteAndRange } from "@/lib/api-context"
+import { resolveReport } from "@/lib/api-context"
 import { computeTopLocations } from "@/lib/top-lists"
 
 export const Route = createFileRoute("/api/sites/$siteId/locations")({
   server: {
     handlers: {
       GET: async ({ request, params }) => {
-        const ctx = await resolveSiteAndRange(request, params.siteId)
-        if (!ctx)
-          return Response.json({ error: "Site not found" }, { status: 404 })
+        const ctx = await resolveReport(request, params.siteId)
+        if (ctx instanceof Response) return ctx
 
         const view = new URL(request.url).searchParams.get("view")
         const dimension: LocationDimension =
@@ -17,7 +16,10 @@ export const Route = createFileRoute("/api/sites/$siteId/locations")({
         const result = await computeTopLocations(
           ctx.site,
           ctx.resolved,
-          dimension
+          dimension,
+          ctx.limit,
+          undefined,
+          ctx.filters
         )
         return Response.json({ range: ctx.resolved, ...result })
       },

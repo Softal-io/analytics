@@ -8,9 +8,10 @@ import { PublicDashboard } from "@/components/dashboard/public-dashboard"
 import { SourceIcon } from "@/components/dashboard/icons"
 import { usePublicRealtime } from "@/hooks/use-public-realtime"
 
-const ranges = ["today", "7d", "30d", "6m", "1y"] as const
+const ranges = ["today", "yesterday", "7d", "30d", "6m", "1y"] as const
 const rangeLabels = [
   "Today",
+  "Yesterday",
   "Last 7 days",
   "Last 30 days",
   "Last 6 months",

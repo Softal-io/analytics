@@ -127,6 +127,28 @@ describe("analytics access", () => {
     }
     expect(read).not.toHaveBeenCalled()
   })
+  it("lets a payment webhook reach its signature check, and nothing else on that path", async () => {
+    const read = vi.fn()
+    expect(
+      await authorizeRequest(
+        request("/api/webhooks/polar", "POST", {
+          Origin: "https://polar.sh",
+        }),
+        read
+      )
+    ).toBeNull()
+    expect(
+      (await authorizeRequest(request("/api/webhooks/polar"), read))?.status
+    ).toBe(405)
+    expect(read).not.toHaveBeenCalled()
+    expect(
+      (
+        await authorizeRequest(request("/api/webhooks/other", "POST"), () =>
+          Promise.resolve(null)
+        )
+      )?.status
+    ).toBe(401)
+  })
   it("leaves server function permissions to their handlers", async () => {
     const read = vi.fn()
     expect(
