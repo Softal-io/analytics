@@ -122,7 +122,12 @@ export function RankedList({
                 key={item.key}
                 className={`group/row relative flex h-7 shrink-0 items-center gap-2 rounded-md px-2 text-sm text-kumo-subtle ${
                   animateItems ? "ranked-list-filter-enter" : ""
-                } ${item.selected ? "ring-1 ring-kumo-brand ring-inset" : ""}`}
+                } ${
+                  // The active filter reads as a filled row with a darker bar.
+                  item.selected
+                    ? "bg-kumo-tint font-medium text-kumo-default"
+                    : ""
+                }`}
                 style={
                   animateItems
                     ? { animationDelay: `${index * 30}ms` }
@@ -130,7 +135,9 @@ export function RankedList({
                 }
               >
                 <div
-                  className="absolute inset-y-0 left-0 rounded-md bg-kumo-tint"
+                  className={`absolute inset-y-0 left-0 rounded-md ${
+                    item.selected ? "bg-kumo-fill" : "bg-kumo-tint"
+                  }`}
                   style={{
                     width: `${Math.max(3, (item.value / max) * 100)}%`,
                   }}

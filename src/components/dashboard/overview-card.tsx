@@ -1,5 +1,6 @@
 import { ChartLegend, ChartPalette } from "@cloudflare/kumo/components/chart"
 import { LayerCard } from "@cloudflare/kumo/components/layer-card"
+import { Popover } from "@cloudflare/kumo/components/popover"
 import { TrafficChart } from "./traffic-chart"
 import type { PublicMetric } from "@/lib/public-options"
 import {
@@ -37,6 +38,12 @@ const metricDescriptions = {
     "Average visible, focused time per visit, including single-page visits. Historical visits retain first-to-last-pageview estimates.",
 }
 
+const changeDirections = {
+  up: { arrow: "↑", spoken: "Up " },
+  down: { arrow: "↓", spoken: "Down " },
+  flat: { arrow: "→", spoken: "Unchanged, " },
+}
+
 /** Change against the earlier period, coloured by whether it is an improvement. */
 function metricChange(
   metric: PublicMetric,
@@ -65,17 +72,21 @@ function metricChange(
 
 export function OverviewCard({
   summary,
-  previous,
-  comparisonLabel,
+  comparison,
   metrics = publicMetrics,
   points,
   timezone = "UTC",
   loading = false,
 }: {
   summary: Partial<Record<PublicMetric, number>>
-  /** The same metrics for the period being compared against. */
-  previous?: Partial<Record<PublicMetric, number>>
-  comparisonLabel?: string
+  /**
+   * The same metrics for an earlier period, with what that period is in
+   * words: a headline, then supporting lines.
+   */
+  comparison?: {
+    previous: Partial<Record<PublicMetric, number>>
+    lines: Array<string>
+  }
   metrics?: ReadonlyArray<PublicMetric>
   points?: Array<TimeseriesPoint>
   timezone?: string
@@ -92,64 +103,101 @@ export function OverviewCard({
             {metrics.map((metric, index) => {
               const value = summary[metric] ?? 0
               const change =
-                loading || !previous
+                loading || !comparison
                   ? null
-                  : metricChange(metric, value, previous[metric])
+                  : metricChange(metric, value, comparison.previous[metric])
               return (
+                // The divider belongs to the tile, so it spans the change
+                // figure too when that wraps under the number.
                 <div
                   key={metric}
                   title={metricDescriptions[metric]}
-                  className="min-w-0 sm:flex-1"
+                  className={`min-w-0 border-neutral-100 py-2 sm:flex-1 ${
+                    index % 2 === 0 ? "pr-4" : "border-l pl-4"
+                  } ${
+                    index === 0
+                      ? "sm:border-l-0 sm:pr-4 sm:pl-0"
+                      : index === metrics.length - 1
+                        ? "sm:border-l sm:pr-0 sm:pl-4"
+                        : "sm:border-l sm:px-4"
+                  }`}
                 >
-                  <ChartLegend.LargeItem
-                    {...metricStyles[metric]}
-                    loading={loading}
-                    value={
-                      metric === "bounceRate"
-                        ? formatPercent(value)
-                        : metric === "avgDurationSeconds"
-                          ? formatDuration(value)
-                          : formatCompactNumber(value)
-                    }
-                    className={`min-w-0 border-neutral-100 sm:flex-1 ${
-                      index % 2 === 0 ? "pr-4" : "border-l pl-4"
-                    } ${
-                      index === 0
-                        ? "sm:border-l-0 sm:pr-4 sm:pl-0"
-                        : index === metrics.length - 1
-                          ? "sm:border-l sm:pr-0 sm:pl-4"
-                          : "sm:border-l sm:px-4"
-                    }`}
-                  />
-                  {change && (
-                    <p
-                      title={comparisonLabel}
-                      className={`mt-0.5 text-xs font-medium tabular-nums ${
-                        index % 2 === 0 ? "" : "pl-4"
-                      } ${index === 0 ? "sm:pl-0" : "sm:pl-4"} ${
-                        change.direction === "flat"
-                          ? "text-kumo-subtle"
-                          : change.good
-                            ? "text-kumo-success"
-                            : "text-kumo-danger"
-                      }`}
-                    >
-                      <span aria-hidden="true">
-                        {change.direction === "up"
-                          ? "↑"
-                          : change.direction === "down"
-                            ? "↓"
-                            : "→"}{" "}
-                      </span>
-                      <span className="sr-only">
-                        {change.direction === "up"
-                          ? "Up "
-                          : change.direction === "down"
-                            ? "Down "
-                            : "Unchanged, "}
-                      </span>
-                      {change.label}
-                    </p>
+                  {loading ? (
+                    <ChartLegend.LargeItem loading className="min-w-0 py-0" />
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="inline-block size-2 shrink-0 rounded-full"
+                          style={{
+                            backgroundColor: metricStyles[metric].color,
+                          }}
+                        />
+                        <span className="truncate text-xs">
+                          {metricStyles[metric].name}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1.5">
+                        <span className="text-lg leading-none font-medium">
+                          {metric === "bounceRate"
+                            ? formatPercent(value)
+                            : metric === "avgDurationSeconds"
+                              ? formatDuration(value)
+                              : formatCompactNumber(value)}
+                        </span>
+                        {change && comparison && (
+                          // A popover, unlike a tooltip, also opens on a tap.
+                          <Popover>
+                            <Popover.Trigger
+                              openOnHover
+                              delay={150}
+                              closeDelay={100}
+                              // An empty title keeps the tile's own
+                              // description from showing over the popover.
+                              title=""
+                              className={`cursor-default rounded-sm text-xs leading-none font-medium whitespace-nowrap tabular-nums focus-visible:outline-2 focus-visible:outline-offset-2 ${
+                                change.direction === "flat"
+                                  ? "text-kumo-subtle"
+                                  : change.good
+                                    ? "text-kumo-success"
+                                    : "text-kumo-danger"
+                              }`}
+                            >
+                              <span aria-hidden="true">
+                                {changeDirections[change.direction].arrow}{" "}
+                                {change.label}
+                              </span>
+                              <span className="sr-only">
+                                {changeDirections[change.direction].spoken}
+                                {change.label}
+                              </span>
+                            </Popover.Trigger>
+                            <Popover.Content
+                              side="bottom"
+                              align="start"
+                              sideOffset={8}
+                              className="rounded-md px-2.5 py-1.5 text-xs"
+                            >
+                              <Popover.Title className="sr-only">
+                                What this change is compared with
+                              </Popover.Title>
+                              {comparison.lines.map((line, lineIndex) => (
+                                <p
+                                  key={line}
+                                  className={`whitespace-nowrap ${
+                                    lineIndex === 0
+                                      ? "font-medium text-kumo-default"
+                                      : "text-kumo-subtle"
+                                  }`}
+                                >
+                                  {line}
+                                </p>
+                              ))}
+                            </Popover.Content>
+                          </Popover>
+                        )}
+                      </div>
+                    </div>
                   )}
                 </div>
               )

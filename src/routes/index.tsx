@@ -15,6 +15,7 @@ import { createFileRoute, useNavigate, useRouter } from "@tanstack/react-router"
 import { createServerFn } from "@tanstack/react-start"
 import { useEffect, useRef, useState } from "react"
 import { z } from "zod"
+import type { ComparableRange } from "@/lib/format"
 import type { PaymentsResult } from "@/lib/payments"
 import type { VisitFilterKey, VisitFilters } from "@/lib/visit-filter-schema"
 import type {
@@ -49,7 +50,7 @@ import { useAnalyticsData } from "@/hooks/use-analytics-data"
 import { useLiveVisitors } from "@/hooks/use-live-visitors"
 import { useSourceDetails } from "@/hooks/use-source-details"
 import { externalUrl, pageUrl } from "@/lib/dashboard-links"
-import { formatDeviceType } from "@/lib/format"
+import { describeComparison, formatDeviceType } from "@/lib/format"
 import {
   visitFilterKeys,
   visitFilterQuery,
@@ -66,7 +67,7 @@ const getDashboardData = createServerFn().handler(async () => {
   return await loadDashboardData()
 })
 
-type UiRangeKey = "today" | "yesterday" | "7d" | "30d" | "6m" | "1y"
+type UiRangeKey = ComparableRange
 
 /** Rows requested per list. Lists scroll, so the tail stays reachable. */
 const LIST_ROWS = 100
@@ -132,22 +133,6 @@ interface SummaryResponse extends SummaryMetrics {
     range: { fromDate: string; toDate: string }
     untilSec?: number
   }
-}
-
-function comparisonLabel(previous: NonNullable<SummaryResponse["previous"]>) {
-  const day = (date: string) =>
-    new Intl.DateTimeFormat("en-GB", {
-      timeZone: "UTC",
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-    }).format(new Date(`${date}T00:00:00Z`))
-  const { fromDate, toDate } = previous.range
-  const period =
-    fromDate === toDate ? day(fromDate) : `${day(fromDate)} to ${day(toDate)}`
-  return `Compared with ${period}${
-    previous.untilSec === undefined ? "" : ", up to the same time of day"
-  }`
 }
 
 interface TimeseriesPoint {
@@ -578,14 +563,15 @@ function App() {
       <OverviewCard
         timezone={selectedSite.timezone}
         summary={summary ?? {}}
-        previous={
+        comparison={
+          // An earlier period with no traffic gives nothing to compare with.
           summary?.previous &&
           summary.previous.visits + summary.previous.pageviews > 0
-            ? summary.previous
+            ? {
+                previous: summary.previous,
+                lines: describeComparison(range, summary.previous),
+              }
             : undefined
-        }
-        comparisonLabel={
-          summary?.previous ? comparisonLabel(summary.previous) : undefined
         }
         metrics={summaryRequest.error ? [] : undefined}
         points={points}
