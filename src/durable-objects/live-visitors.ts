@@ -8,6 +8,9 @@ import {
   authorizedRealtimeSessions,
 } from "@/lib/realtime-access"
 
+/** A visitor's position, with the place it maps to for dashboard filters. */
+export type LiveVisitorLocation = Omit<RealtimeVisitorLocation, "count">
+
 /**
  * LiveVisitors — one Durable Object per site (§11 of the spec).
  *
@@ -29,14 +32,19 @@ type StoredVisitor = {
   seen_at: number
   latitude: number | null
   longitude: number | null
+  country: string | null
+  region: string | null
+  city: string | null
 }
+
+const PLACE_COLUMNS = ["country", "region", "city"] as const
 
 export class LiveVisitors extends DurableObject<Env> {
   private lastSeen = new Map<
     string,
     {
       seenAt: number
-      location: Omit<RealtimeVisitorLocation, "count"> | null
+      location: LiveVisitorLocation | null
     }
   >()
 
@@ -50,20 +58,47 @@ export class LiveVisitors extends DurableObject<Env> {
         longitude REAL
       )
     `)
+    // Objects created before places were tracked lack these columns.
+    const columns = new Set(
+      Array.from(
+        this.ctx.storage.sql.exec<{ name: string }>(
+          "SELECT name FROM pragma_table_info('live_visitors')"
+        ),
+        ({ name }) => name
+      )
+    )
+    for (const column of PLACE_COLUMNS) {
+      if (!columns.has(column))
+        this.ctx.storage.sql.exec(
+          `ALTER TABLE live_visitors ADD COLUMN ${column} TEXT`
+        )
+    }
     const cutoff = Date.now() - STALE_AFTER_MS
     this.ctx.storage.sql.exec(
       "DELETE FROM live_visitors WHERE seen_at < ?",
       cutoff
     )
     const stored = this.ctx.storage.sql.exec<StoredVisitor>(
-      "SELECT visitor_id, seen_at, latitude, longitude FROM live_visitors"
+      "SELECT visitor_id, seen_at, latitude, longitude, country, region, city FROM live_visitors"
     )
     for (const visitor of stored) {
       this.lastSeen.set(visitor.visitor_id, {
         seenAt: visitor.seen_at,
         location:
           visitor.latitude !== null && visitor.longitude !== null
-            ? { latitude: visitor.latitude, longitude: visitor.longitude }
+            ? {
+                latitude: visitor.latitude,
+                longitude: visitor.longitude,
+                ...(visitor.country
+                  ? {
+                      place: {
+                        country: visitor.country,
+                        region: visitor.region,
+                        city: visitor.city,
+                      },
+                    }
+                  : {}),
+              }
             : null,
       })
     }
@@ -72,7 +107,7 @@ export class LiveVisitors extends DurableObject<Env> {
   /** Called by `/collect` on every pageview for this site. */
   async ping(
     visitorId: string,
-    location?: Omit<RealtimeVisitorLocation, "count">,
+    location?: LiveVisitorLocation,
     seenAt = Date.now()
   ): Promise<number> {
     const before = this.lastSeen.size
@@ -93,16 +128,22 @@ export class LiveVisitors extends DurableObject<Env> {
       location: nextLocation,
     })
     this.ctx.storage.sql.exec(
-      `INSERT INTO live_visitors (visitor_id, seen_at, latitude, longitude)
-       VALUES (?, ?, ?, ?)
+      `INSERT INTO live_visitors (visitor_id, seen_at, latitude, longitude, country, region, city)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (visitor_id) DO UPDATE SET
          seen_at = excluded.seen_at,
          latitude = excluded.latitude,
-         longitude = excluded.longitude`,
+         longitude = excluded.longitude,
+         country = excluded.country,
+         region = excluded.region,
+         city = excluded.city`,
       visitorId,
       this.lastSeen.get(visitorId)?.seenAt ?? Date.now(),
       nextLocation?.latitude ?? null,
-      nextLocation?.longitude ?? null
+      nextLocation?.longitude ?? null,
+      nextLocation?.place?.country ?? null,
+      nextLocation?.place?.region ?? null,
+      nextLocation?.place?.city ?? null
     )
 
     if ((await this.ctx.storage.getAlarm()) === null) {
@@ -261,13 +302,19 @@ export class LiveVisitors extends DurableObject<Env> {
 
     for (const visitor of this.lastSeen.values()) {
       if (!visitor.location) continue
-      const { latitude, longitude } = visitor.location
+      const { latitude, longitude, place } = visitor.location
       const key = `${latitude}:${longitude}`
       const existing = locations.get(key)
       if (existing) {
         existing.count += 1
+        existing.place ??= place
       } else {
-        locations.set(key, { latitude, longitude, count: 1 })
+        locations.set(key, {
+          latitude,
+          longitude,
+          count: 1,
+          ...(place ? { place } : {}),
+        })
       }
     }
 

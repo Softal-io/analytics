@@ -1,9 +1,12 @@
 import { XIcon } from "@phosphor-icons/react"
 import type { VisitFilterKey, VisitFilters } from "@/lib/visit-filter-schema"
-import { formatCampaign, formatDeviceType, formatReferrer } from "@/lib/format"
+import {
+  formatCampaign,
+  formatCountry,
+  formatDeviceType,
+  formatReferrer,
+} from "@/lib/format"
 import { visitFilterKeys } from "@/lib/visit-filter-schema"
-
-const countryNames = new Intl.DisplayNames(["en"], { type: "region" })
 
 const filterNames: Record<VisitFilterKey, string> = {
   page: "Page",
@@ -26,13 +29,7 @@ function filterValueLabel(key: VisitFilterKey, value: string): string {
   if (key === "paid") return "Paying visits"
   if (key === "referrer") return formatReferrer(value)
   if (key === "device") return formatDeviceType(value)
-  if (key === "country") {
-    try {
-      return countryNames.of(value) ?? value
-    } catch {
-      return value
-    }
-  }
+  if (key === "country") return formatCountry(value)
   if (key === "link") return value.replace(/^https?:\/\//, "")
   if (key === "utm") {
     try {

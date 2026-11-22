@@ -62,7 +62,15 @@ export async function loadPublicRealtime(
     canShareRealtimeGlobe(view.settings.sections)
   if (!sharesLocations) return { count: await visitors.count() }
   const { count, locations } = await visitors.snapshot()
-  return { count, locations }
+  // Public viewers see approximate positions only, never named places.
+  return {
+    count,
+    locations: locations.map((location) => ({
+      latitude: location.latitude,
+      longitude: location.longitude,
+      count: location.count,
+    })),
+  }
 }
 
 export async function loadPublicSnapshot(

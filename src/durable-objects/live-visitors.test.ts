@@ -63,6 +63,25 @@ describe("live visitor persistence", () => {
     expect(await visitors.snapshot()).toEqual({ count: 0, locations: [] })
     database.close()
   })
+  it("reports each location's place and upgrades tables stored without one", async () => {
+    const { state, database } = createState()
+    database.exec(
+      "CREATE TABLE live_visitors (visitor_id TEXT PRIMARY KEY, seen_at INTEGER NOT NULL, latitude REAL, longitude REAL)"
+    )
+    database
+      .prepare("INSERT INTO live_visitors VALUES (?, ?, ?, ?)")
+      .run("old", Date.now(), 53.3, -6.2)
+    const visitors = new LiveVisitors(state, {} as Env)
+    const place = { country: "IE", region: "L", city: "Dublin" }
+    await visitors.ping("new", { latitude: 53.3, longitude: -6.2, place })
+    expect(await visitors.snapshot()).toEqual({
+      count: 2,
+      locations: [{ latitude: 53.3, longitude: -6.2, count: 2, place }],
+    })
+    const restored = new LiveVisitors(state, {} as Env)
+    expect((await restored.snapshot()).locations[0]?.place).toEqual(place)
+    database.close()
+  })
   it("does not revive stale visitors or move their presence backward when reports retry", async () => {
     vi.useFakeTimers()
     const { state, database } = createState()

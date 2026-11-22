@@ -1,23 +1,84 @@
 import { useEffect, useMemo, useRef } from "react"
 import type { Globe, Marker } from "cobe"
-import type { RealtimeVisitorLocation } from "@/lib/realtime"
+import type {
+  RealtimeVisitorLocation,
+  RealtimeVisitorPlace,
+} from "@/lib/realtime"
+import { formatCountry } from "@/lib/format"
+
+/** Whether a place is the active filter, and how to toggle it. */
+export type PlaceFilter = (place: RealtimeVisitorPlace) => {
+  selected: boolean
+  onSelect: () => void
+}
 
 interface RealtimeGlobeProps {
   count: number
   locations: Array<RealtimeVisitorLocation>
   simulate?: boolean
+  /** Makes avatars with a known place filter the dashboard to it. */
+  placeFilter?: PlaceFilter
+}
+
+function placeLabel({ country, region, city }: RealtimeVisitorPlace) {
+  return [city ?? region, formatCountry(country)].filter(Boolean).join(", ")
 }
 
 const SIMULATED_LOCATIONS: Array<RealtimeVisitorLocation> = [
-  { latitude: 37.7749, longitude: -122.4194, count: 3 },
-  { latitude: 40.7128, longitude: -74.006, count: 2 },
-  { latitude: 51.5072, longitude: -0.1276, count: 2 },
-  { latitude: 12.9716, longitude: 77.5946, count: 4 },
-  { latitude: 1.3521, longitude: 103.8198, count: 1 },
-  { latitude: 35.6762, longitude: 139.6503, count: 2 },
-  { latitude: -33.8688, longitude: 151.2093, count: 1 },
-  { latitude: -23.5505, longitude: -46.6333, count: 2 },
-  { latitude: -33.9249, longitude: 18.4241, count: 1 },
+  {
+    latitude: 37.7749,
+    longitude: -122.4194,
+    count: 3,
+    place: { country: "US", region: "CA", city: "San Francisco" },
+  },
+  {
+    latitude: 40.7128,
+    longitude: -74.006,
+    count: 2,
+    place: { country: "US", region: "NY", city: "New York" },
+  },
+  {
+    latitude: 51.5072,
+    longitude: -0.1276,
+    count: 2,
+    place: { country: "GB", region: "ENG", city: "London" },
+  },
+  {
+    latitude: 12.9716,
+    longitude: 77.5946,
+    count: 4,
+    place: { country: "IN", region: "KA", city: "Bengaluru" },
+  },
+  {
+    latitude: 1.3521,
+    longitude: 103.8198,
+    count: 1,
+    place: { country: "SG", region: null, city: "Singapore" },
+  },
+  {
+    latitude: 35.6762,
+    longitude: 139.6503,
+    count: 2,
+    place: { country: "JP", region: "13", city: "Tokyo" },
+  },
+  {
+    latitude: -33.8688,
+    longitude: 151.2093,
+    count: 1,
+    place: { country: "AU", region: "NSW", city: "Sydney" },
+  },
+  {
+    latitude: -23.5505,
+    longitude: -46.6333,
+    count: 2,
+    place: { country: "BR", region: "SP", city: "São Paulo" },
+  },
+  {
+    latitude: -33.9249,
+    longitude: 18.4241,
+    count: 1,
+    place: { country: "ZA", region: "WC", city: "Cape Town" },
+  },
 ]
 
 const AVATAR_SEEDS = [
@@ -39,6 +100,7 @@ interface AvatarMarker {
   id: string
   location: [number, number]
   seed: string
+  place?: RealtimeVisitorPlace
 }
 
 function hashLocation(latitude: number, longitude: number): number {
@@ -54,6 +116,7 @@ export function RealtimeGlobe({
   count,
   locations,
   simulate = false,
+  placeFilter,
 }: RealtimeGlobeProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -74,6 +137,7 @@ export function RealtimeGlobe({
           id: `visitor-${hash}`,
           location: [location.latitude, location.longitude],
           seed: AVATAR_SEEDS[hash % AVATAR_SEEDS.length] ?? "Felix",
+          place: location.place,
         }
       }),
     [displayedLocations]
@@ -166,7 +230,8 @@ export function RealtimeGlobe({
   return (
     <div
       ref={containerRef}
-      className="relative h-full min-h-72 w-full overflow-hidden"
+      // Isolated so the avatars' z-index never lifts them over dialogs.
+      className="relative isolate h-full min-h-72 w-full overflow-hidden"
     >
       <canvas
         ref={canvasRef}
@@ -192,22 +257,57 @@ export function RealtimeGlobe({
       />
       {avatarMarkers.map((marker) => {
         const visibility = `var(--cobe-visible-${marker.id}, 0)`
-        return (
+        const filter =
+          placeFilter && marker.place ? placeFilter(marker.place) : undefined
+        const style: React.CSSProperties = {
+          positionAnchor: `--cobe-${marker.id}`,
+          left: "anchor(center)",
+          top: "anchor(center)",
+          translate: "-50% -50%",
+          opacity: visibility,
+          filter: `blur(calc((1 - ${visibility}) * 4px))`,
+        }
+        const avatar = (
           <img
-            key={marker.id}
             src={`https://api.dicebear.com/10.x/adventurer/svg?seed=${encodeURIComponent(marker.seed)}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf`}
             alt=""
             aria-hidden="true"
-            className="pointer-events-none absolute z-10 size-6 rounded-full bg-white object-cover shadow-md ring-2 ring-white transition-[opacity,filter] duration-200"
-            style={{
-              positionAnchor: `--cobe-${marker.id}`,
-              left: "anchor(center)",
-              top: "anchor(center)",
-              translate: "-50% -50%",
-              opacity: visibility,
-              filter: `blur(calc((1 - ${visibility}) * 4px))`,
-            }}
+            className={`size-6 rounded-full bg-white object-cover shadow-md ring-2 transition-transform duration-200 ${
+              filter?.selected ? "scale-125 ring-kumo-brand" : "ring-white"
+            }`}
           />
+        )
+        if (!filter || !marker.place)
+          return (
+            <div
+              key={marker.id}
+              className="pointer-events-none absolute z-10 transition-[opacity,filter] duration-200"
+              style={style}
+            >
+              {avatar}
+            </div>
+          )
+        const label = placeLabel(marker.place)
+        return (
+          <button
+            key={marker.id}
+            type="button"
+            aria-pressed={filter.selected}
+            aria-label={
+              filter.selected
+                ? `Remove the ${label} filter`
+                : `Filter the dashboard to ${label}`
+            }
+            title={label}
+            onClick={filter.onSelect}
+            className={`absolute cursor-pointer rounded-full transition-[opacity,filter,scale] duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 hover:[&>img]:scale-125 ${
+              filter.selected ? "z-20" : "z-10"
+            }`}
+            // Avatars behind the globe shrink to nothing, so they can't be clicked.
+            style={{ ...style, scale: visibility }}
+          >
+            {avatar}
+          </button>
         )
       })}
       <div className="pointer-events-none absolute inset-x-0 bottom-2 text-center text-xs text-kumo-subtle">

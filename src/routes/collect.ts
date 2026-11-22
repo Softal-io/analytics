@@ -411,6 +411,11 @@ function pingRecentVisitor(
       ? {
           latitude: geo.latitude,
           longitude: geo.longitude,
+          place: {
+            country: geo.country,
+            region: geo.region,
+            city: geo.city,
+          },
         }
       : undefined
   waitUntil(

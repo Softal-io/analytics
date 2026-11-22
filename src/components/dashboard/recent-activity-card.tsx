@@ -1,5 +1,6 @@
 import { LayerCard } from "@cloudflare/kumo/components/layer-card"
 import type { RealtimeVisitorLocation } from "@/lib/realtime"
+import type { PlaceFilter } from "@/components/dashboard/realtime-globe"
 import { RealtimeGlobe } from "@/components/dashboard/realtime-globe"
 
 export function RecentActivityCard({
@@ -7,11 +8,13 @@ export function RecentActivityCard({
   locations,
   simulate = false,
   unavailable = false,
+  placeFilter,
 }: {
   count: number | null
   locations?: Array<RealtimeVisitorLocation>
   simulate?: boolean
   unavailable?: boolean
+  placeFilter?: PlaceFilter
 }) {
   return (
     <LayerCard role="region" aria-label="Recent activity">
@@ -42,6 +45,7 @@ export function RecentActivityCard({
               count={count}
               locations={locations}
               simulate={simulate}
+              placeFilter={placeFilter}
             />
           </div>
         ) : (

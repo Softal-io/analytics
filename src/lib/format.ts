@@ -5,6 +5,17 @@ export function formatCompactNumber(n: number): string {
   }).format(n)
 }
 
+const countryNames = new Intl.DisplayNames(["en"], { type: "region" })
+
+/** A country's English name, or the code as recorded when Intl doesn't know it. */
+export function formatCountry(code: string): string {
+  try {
+    return countryNames.of(code) ?? code
+  } catch {
+    return code
+  }
+}
+
 export function formatDuration(seconds: number): string {
   const s = Math.max(0, Math.round(seconds))
   const m = Math.floor(s / 60)

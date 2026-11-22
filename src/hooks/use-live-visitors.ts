@@ -9,6 +9,13 @@ const payloadSchema = z.object({
       latitude: z.number().min(-90).max(90),
       longitude: z.number().min(-180).max(180),
       count: z.number().int().nonnegative(),
+      place: z
+        .object({
+          country: z.string().min(1),
+          region: z.string().nullable(),
+          city: z.string().nullable(),
+        })
+        .optional(),
     })
   ),
 })

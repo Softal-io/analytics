@@ -24,7 +24,14 @@ beforeEach(() => {
   live.count.mockReset().mockResolvedValue(2)
   live.snapshot.mockReset().mockResolvedValue({
     count: 2,
-    locations: [{ latitude: 53.3, longitude: -6.2, count: 2 }],
+    locations: [
+      {
+        latitude: 53.3,
+        longitude: -6.2,
+        count: 2,
+        place: { country: "IE", region: "L", city: "Dublin" },
+      },
+    ],
   })
   database = new DatabaseSync(":memory:")
   const migrations = new URL("../../drizzle/", import.meta.url)

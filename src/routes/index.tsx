@@ -50,7 +50,11 @@ import { useAnalyticsData } from "@/hooks/use-analytics-data"
 import { useLiveVisitors } from "@/hooks/use-live-visitors"
 import { useSourceDetails } from "@/hooks/use-source-details"
 import { externalUrl, pageUrl } from "@/lib/dashboard-links"
-import { describeComparison, formatDeviceType } from "@/lib/format"
+import {
+  describeComparison,
+  formatCountry,
+  formatDeviceType,
+} from "@/lib/format"
 import {
   visitFilterKeys,
   visitFilterQuery,
@@ -183,10 +187,8 @@ function useTopList<TRow>(
   }
 }
 
-const countryNames = new Intl.DisplayNames(["en"], { type: "region" })
-
 function locationLabel(row: TopLocationRow, dimension: LocationDimension) {
-  const country = countryNames.of(row.country) ?? row.country
+  const country = formatCountry(row.country)
   if (dimension === "city") return `${row.city}, ${country}`
   if (dimension === "region") return `${row.region}, ${country}`
   return country
@@ -349,6 +351,28 @@ function App() {
     return {
       selected,
       onSelect: () => setFilters({ [key]: selected ? undefined : value }),
+    }
+  }
+  /** A place filters by country plus its region or city, like a location row. */
+  function placeFilter(place: {
+    country: string
+    region?: string | null
+    city?: string | null
+  }) {
+    const region = place.region || undefined
+    const city = place.city || undefined
+    const selected =
+      filters.country === place.country &&
+      filters.region === region &&
+      filters.city === city
+    return {
+      selected,
+      onSelect: () =>
+        setFilters(
+          selected
+            ? { country: undefined, region: undefined, city: undefined }
+            : { country: place.country, region, city }
+        ),
     }
   }
   function clearFilters() {
@@ -714,6 +738,7 @@ function App() {
           count={liveVisitors.count}
           locations={liveVisitors.locations}
           simulate={import.meta.env.DEV && search.simulateLocations === true}
+          placeFilter={placeFilter}
         />
 
         <LayerCard role="region" aria-label="Devices">
@@ -782,35 +807,13 @@ function App() {
               loading={locationList.loading}
               error={locationList.error}
               onRetry={locationList.retry}
-              items={locationList.rows.map((r) => {
-                // A place is one filter: its country plus its region or city.
-                const place = {
-                  country: r.country,
-                  region: r.region || undefined,
-                  city: r.city || undefined,
-                }
-                const selected =
-                  filters.country === place.country &&
-                  filters.region === place.region &&
-                  filters.city === place.city
-                return {
-                  key: `${r.country}-${r.region}-${r.city}`,
-                  label: locationLabel(r, locationDimension),
-                  icon: <CountryFlag country={r.country} />,
-                  value: r.visits,
-                  selected,
-                  onSelect: () =>
-                    setFilters(
-                      selected
-                        ? {
-                            country: undefined,
-                            region: undefined,
-                            city: undefined,
-                          }
-                        : place
-                    ),
-                }
-              })}
+              items={locationList.rows.map((r) => ({
+                key: `${r.country}-${r.region}-${r.city}`,
+                label: locationLabel(r, locationDimension),
+                icon: <CountryFlag country={r.country} />,
+                value: r.visits,
+                ...placeFilter(r),
+              }))}
               metricLabel="Visits"
               total={locationList.total}
               animateItems={locationList.animateItems}
